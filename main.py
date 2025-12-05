@@ -66,9 +66,9 @@ class main:
     def tests(self):
         pdf_processer = PDFProcesser()
 
-        pdf = "data/pdfs/NVMe-Base-2.0d.pdf"
+        #pdf = "data/pdfs/NVMe-Base-2.0d.pdf"
         #pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
-        #pdf = "data/pdfs/SinglePage.pdf"
+        pdf = "data/pdfs/SinglePage.pdf"
 
         docs = pdf_processer.pdf_to_chunks(pdf)
         for i, doc in enumerate(docs):

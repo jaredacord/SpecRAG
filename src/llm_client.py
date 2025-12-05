@@ -33,8 +33,8 @@ class LLMClient:
 
         logger.info("Model defined with model name: {}, temperature: {}".format(model_name, str(temperature)))
 
-    def summarize_image(self, image_file_path):
-        prompt = "Describe this local image in detail:"
+    def summarize_image(self, image_file_path, chunk_size):
+        prompt = "Describe this local image in detail, using around {} characters:".format(chunk_size)
 
         logger.info("Summerizing image at: '{}'".format(image_file_path))
 
