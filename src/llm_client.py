@@ -1,3 +1,4 @@
+import base64
 import json
 import logging
 import os
@@ -32,34 +33,98 @@ class LLMClient:
 
         logger.info("Model defined with model name: {}, temperature: {}".format(model_name, str(temperature)))
 
+    def summarize_image(self, image_file_path):
+        prompt = "Describe this local image in detail:"
 
-    def answer_with_context(self, query, retrieved_docs):
-        logger.info("Answering question: '{}', using {} references.".format(query, len(retrieved_docs)))
+        logger.info("Summerizing image at: '{}'".format(image_file_path))
 
         start = time.time()
-        context = "\n\n".join([d.page_content for d in retrieved_docs])
-        prompt = f"""
-    Use the following context from a PDF to answer the question.
-    
-    CONTEXT:
-    {context}
-    
-    QUESTION:
-    {query}
-    
-    Answer the question using only the context.
-    """
+        encoded_image = self.encode_image(image_file_path)
 
-        response = self.model.invoke([HumanMessage(content=prompt)])
+        message_local = HumanMessage(
+            content=[
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": f"data:image/png;base64,{encoded_image}"},
+            ]
+        )
+        response = self.model.invoke([message_local])
+        duration = time.time() - start
+        usage = getattr(response, "usage_metadata", {})
+
+        self.log_llm_usage("summarize_image", duration, prompt, response.content, usage)
+
+        return response.content
+
+    def encode_image(self, image_path):
+        with open(image_path, "rb") as image_file:
+            return base64.b64encode(image_file.read()).decode("utf-8")
+
+    def answer_with_context(self, query, relevent_chunks):
+        logger.info(f"Answering question: '{query}', using {len(relevent_chunks)} refs.")
+
+        start = time.time()
+        message_content = []
+
+        context_contents = []
+
+        for i, chunk in enumerate(relevent_chunks):
+            metadata = chunk.metadata
+            content = chunk.page_content
+
+            metadata_as_text = json.dumps(metadata)
+            chunk_type = metadata.get("type", "text")
+
+            context_content = ""
+
+            if chunk_type == "text":
+
+                context_content += "Relevant Chunk Number: {} \n".format(i)
+                context_content += "Metadata: {} \n".format(metadata_as_text)
+                context_content += "Content: {} \n\n".format(content)
+
+                context_contents.append({"type": "text", "text": context_content})
+
+            elif chunk_type == "table":
+                image_path = metadata.get("table_path", "")
+                encoded_image = self.encode_image(image_path) if image_path else ""
+
+                context_content += "Relevant Chunk Number: {} \n".format(i)
+                context_content += "Metadata: {} \n".format(metadata_as_text)
+                context_content += "Content: \n"
+
+                context_contents.append({"type": "text", "text": context_content})
+                context_contents.append({"type": "image_url", "image_url": f"data:image/png;base64,{encoded_image}"},)
+
+        temp_promt_1 = f"""
+            You are answering a question using content extracted from a PDF. 
+            The context may include text or tables (provided as images).
+        
+            Rules:
+            1. Use ONLY the provided context.
+            2. For tables, use OCR for accurate interpretation.
+            3. If information is missing, say so.
+        
+            CONTEXT:
+            """
+        temp_promt_2 = f"""
+            QUESTION:
+            {query}
+    
+            Answer using only the provided context.
+            """
+
+        message_content.append({"type": "text", "text": temp_promt_1})
+        message_content.extend(context_contents)
+        message_content.append({"type": "text", "text": temp_promt_2})
+
+        response = self.model.invoke([HumanMessage(content=message_content)])
 
         duration = time.time() - start
         usage = getattr(response, "usage_metadata", {})
 
-        self.log_llm_usage("answer_with_context", duration, prompt, response.content, usage)
-
         return {
             "answer": response.content,
-            "chunks": retrieved_docs
+            "chunks": relevent_chunks
         }
 
     def log_llm_usage(self, method, duration, prompt, response, usage = None):

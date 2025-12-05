@@ -11,7 +11,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from config import FAISSConfig
 
 
-class FAISSClient():
+class FAISSClient:
     def __init__(self):
 
         logger.info("Initializing FAISS Client")
@@ -40,13 +40,17 @@ class FAISSClient():
 
     def add_to_faiss_store(self, chunks):
 
+        contents = [chunk["page_content"] for chunk in chunks]
+        metadatas = [chunk["metadata"] for chunk in chunks]
+
         logger.info("Adding {} chunks to FAISS store...".format(len(chunks)))
         if self.store is not None:
-            self.store.add_texts(chunks, embedding=self.embeddings)
+            self.store.add_texts(texts=contents, embedding=self.embeddings, metadatas=metadatas)
+
             logger.info("FAISS store updated successfully.")
 
         else:
-            self.store = FAISS.from_texts(chunks, embedding=self.embeddings)
+            self.store = FAISS.from_texts(texts=contents, embedding=self.embeddings, metadatas=metadatas)
             logger.info("FAISS store created and updated successfully.")
 
         self.store.save_local(self.storage_path)
