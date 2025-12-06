@@ -34,7 +34,10 @@ class LLMClient:
         logger.info("Model defined with model name: {}, temperature: {}".format(model_name, str(temperature)))
 
     def summarize_image(self, image_file_path, chunk_size):
-        prompt = "Describe this local image in detail, using around {} characters:".format(chunk_size)
+        prompt = """You are an expert in the field of NVMe flash storage devices. Given an image, produce a detailed, 
+        factual, and technical description of the image so that this text can later be stored in a vector 
+        database and used to retrieve the original image. The description must be around {} characters.
+        Image:""".format(chunk_size)
 
         logger.info("Summerizing image at: '{}'".format(image_file_path))
 

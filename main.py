@@ -41,7 +41,7 @@ class main:
         )
 
     def start(self):
-        self.tests()
+        self.usage()
 
     def setup(self):
 
@@ -54,30 +54,59 @@ class main:
 
     def usage(self):
 
-        query = "Where can I look for more information on the path relates status code?"
+        #query = "Where can I look for more information on the path relates status code?"
+        query = "How are I/O Command Set Specifications and nvme specifications related?"
+
         relevent_chunks = self.faiss_client.retrieve(query, top_n=5)
         response = self.llm_client.answer_with_context(query, relevent_chunks)
         print("Query: {}\n".format(query))
         print("Answer: {}\n".format(response["answer"]))
         for i, chunk in enumerate(response["chunks"]):
-            print("=====Relevent chunk {}=====".format(i+1))
-            print(chunk.page_content+" .\n")
+            print(chunk)
 
     def tests(self):
         pdf_processer = PDFProcesser()
 
         #pdf = "data/pdfs/NVMe-Base-2.0d.pdf"
-        #pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
-        pdf = "data/pdfs/SinglePage.pdf"
+        pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
+        #pdf = "data/pdfs/SinglePage.pdf"
 
-        docs = pdf_processer.pdf_to_chunks(pdf)
-        for i, doc in enumerate(docs):
-            print("=====Document {}=====".format(i+1))
-            print("\t===page_content=====")
-            print("\t"+doc["page_content"]+"\n")
-            print("\t===metadata====="+"\n")
-            print("\t"+str(doc["metadata"]))
-            print()
+        chunks = pdf_processer.pdf_to_chunks(pdf)
+
+        chunks_by_page = []
+        for i in range(1, 16):
+            chunks_by_page.append(chunk for chunk in chunks if chunk["metadata"]["page"] == i)
+
+        for i, chunk_by_page in enumerate(chunks_by_page, start=1):
+            print(f"=== Page {i} =====")
+
+            tables = []
+            drawings = []
+            texts = []
+
+            for chunk in chunk_by_page:
+                if chunk["metadata"]["type"] == "table":
+                    tables.append(chunk)
+                elif chunk["metadata"]["type"] == "drawing":
+                    drawings.append(chunk)
+                else:
+                    texts.append(chunk)
+
+            print(f"===== Page {i} - tables =====")
+            for chunk in tables:
+                print(chunk)
+
+            print(f"===== Page {i} - drawings =====")
+            for chunk in drawings:
+                print(chunk)
+
+            print(f"===== Page {i} - texts =====")
+            for chunk in texts:
+                print(chunk)
+
+            print("\n")
+
+
 
 if __name__ == '__main__':
     main()
