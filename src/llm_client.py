@@ -6,7 +6,7 @@ import time
 
 logger = logging.getLogger(__name__)
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
 from config import LLMConfig
@@ -33,30 +33,80 @@ class LLMClient:
 
         logger.info("Model defined with model name: {}, temperature: {}".format(model_name, str(temperature)))
 
-    def summarize_image(self, image_file_path, chunk_size):
-        prompt = """You are an expert in the field of NVMe flash storage devices. Given an image, produce a detailed, 
-        factual, and technical description of the image so that this text can later be stored in a vector 
-        database and used to retrieve the original image. The description must be around {} characters.
-        Image:""".format(chunk_size)
-
-        logger.info("Summerizing image at: '{}'".format(image_file_path))
+    def query_llm(self, origin, message):
 
         start = time.time()
-        encoded_image = self.encode_image(image_file_path)
-
-        message_local = HumanMessage(
-            content=[
-                {"type": "text", "text": prompt},
-                {"type": "image_url", "image_url": f"data:image/png;base64,{encoded_image}"},
-            ]
-        )
-        response = self.model.invoke([message_local])
+        response = self.model.invoke(message)
         duration = time.time() - start
-        usage = getattr(response, "usage_metadata", {})
 
-        self.log_llm_usage("summarize_image", duration, prompt, response.content, usage)
+        usage = getattr(response, "usage_metadata", {})
+        self.log_llm_usage(origin, duration, message, response.content, usage)
 
         return response.content
+
+    def describe_image(self, image_file_path, chunk_size):
+
+        logger.info("Describing image at: '{}'".format(image_file_path))
+
+        purpose = """You are an expert in NVMe flash storage devices and NVMe specifications.
+
+                    Your task is to generate a strictly factual, literal description of the provided image 
+                    so it can be stored in a vector database and later used to retrieve the same image.
+                    
+                    Follow these rules:
+                    
+                    1. ONLY describe what is visually present in the image.
+                    2. DO NOT infer missing details, brand names, hardware models, device types, product 
+                    families, or physical components unless they are explicitly shown.
+                    3. If the image is a diagram, chart, table, or schematic, describe the layout, shapes, 
+                    labels, colors, and relationships between elements.
+                    4. Do NOT assume the image shows real hardware unless real hardware is visually present.
+                    5. If something is unclear or ambiguous, state that it is unclear rather than guessing.
+                    6. The description must be approximately {} characters.
+                    
+                    Begin with: "This image shows..." and continue with a grounded, technical description.
+                    """.format(chunk_size)
+
+        with open(image_file_path, "rb") as f:
+            image_bytes = f.read()
+
+        messages = [
+            SystemMessage(content=purpose),
+            HumanMessage(
+                content="Image: ",
+                image=image_bytes
+            )
+        ]
+
+        response = self.query_llm("describe_image", messages)
+
+        return response
+
+    def generate_questions(self, query):
+
+        purpose = """You are an expert in NVMe, NVMe-MI, PCIe, and storage specifications. 
+                    Your task is to generate 3 to 5 alternative search queries that can be used
+                    to retrieve relevant chunks from a vector database.
+                    The expansions must remain faithful to the user's intent.\n\n
+                    Guidelines:\n
+                    - Produce 3 to 5 alternative search queries.\n
+                    - Use terminology and aliases as they appear in NVMe/PCIe specs.\n
+                    - No assumptions or invented details.\n
+                    - DO NOT answer the question.\n
+                    - Output ONLY a JSON array of strings, e.g.: ["query1", "query2"]."""
+
+        messages = [
+            SystemMessage(content=purpose),
+            HumanMessage(
+                content="Original question: {}\n\nGenerate helpful alternative search queries.".format(query)
+            )
+        ]
+
+        response = self.query_llm("generate_questions", messages)
+
+        response = response.replace("```json", "").replace("```", "").strip()
+
+        return json.loads(response)
 
     def encode_image(self, image_path):
         with open(image_path, "rb") as image_file:

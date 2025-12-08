@@ -5,11 +5,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-import pymupdf
-import pandas as pd
-
 from src.pdf_processer import PDFProcesser
-from config import LoggingConfig
+from config import LoggingConfig, PDFProcessingConfig
 from src.faiss_client import FAISSClient
 from src.llm_client import LLMClient
 
@@ -41,12 +38,12 @@ class main:
         )
 
     def start(self):
-        self.usage()
+        self.setup()
 
     def setup(self):
 
         pdfs = [
-            "data/pdfs/NVMe-Base-2.0d-small.pdf",
+            "data/pdfs/NVMe-Base-2.0d.pdf",
             #"data/pdfs/NVMe-MI-1.2c.pdf"
                 ]
         for pdf in pdfs:
@@ -55,7 +52,7 @@ class main:
     def usage(self):
 
         #query = "Where can I look for more information on the path relates status code?"
-        query = "How are I/O Command Set Specifications and nvme specifications related?"
+        query = "What information does a smart log contain? How is a smart log obtained?"
 
         relevent_chunks = self.faiss_client.retrieve(query, top_n=5)
         response = self.llm_client.answer_with_context(query, relevent_chunks)
@@ -68,7 +65,8 @@ class main:
         pdf_processer = PDFProcesser()
 
         #pdf = "data/pdfs/NVMe-Base-2.0d.pdf"
-        pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
+        #pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
+        pdf = "data/pdfs/NVMe-Base-2.0d-image-test.pdf"
         #pdf = "data/pdfs/SinglePage.pdf"
 
         chunks = pdf_processer.pdf_to_chunks(pdf)
@@ -105,6 +103,20 @@ class main:
                 print(chunk)
 
             print("\n")
+
+    def test_generate_questions(self):
+        query = "Which section contains information on the arbitration FID?"
+
+        additional_queries = self.llm_client.generate_questions(query)
+        for i, query in enumerate(additional_queries, start=1):
+            print(f"Question {i}: {query}")
+
+    def test_describe_image(self):
+        image_path = "data/pdf_assets/NVMe-Base-2.0d/images/NVMe-Base-2.0d_p14_drawing0.png"
+
+        description = self.llm_client.describe_image(image_path, PDFProcessingConfig.chunk_size)
+
+        print(description)
 
 
 

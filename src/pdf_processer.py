@@ -1,6 +1,7 @@
 import logging
 import os
 import time
+import uuid
 
 import pymupdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
@@ -25,6 +26,7 @@ class PDFProcesser:
         self.min_image_size = PDFProcessingConfig.min_image_size
         self.object_header_height = PDFProcessingConfig.object_header_height
         self.table_render_dpi = PDFProcessingConfig.table_render_dpi
+        self.max_image_discontinuity = PDFProcessingConfig.max_image_discontinuity
 
         # Define the text splitter, used in chunking
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -32,6 +34,62 @@ class PDFProcesser:
             chunk_overlap=self.chunk_overlap,
             separators=["\n\n", "\n", " ", ""]
         )
+
+    def boxes_touch(self, b1, b2, thresh):
+        x0a, y0a, x1a, y1a = b1
+        x0b, y0b, x1b, y1b = b2
+
+        # Expand boxes by threshold to test adjacency
+        x0a -= thresh;
+        y0a -= thresh;
+        x1a += thresh;
+        y1a += thresh
+        x0b -= thresh;
+        y0b -= thresh;
+        x1b += thresh;
+        y1b += thresh
+
+        # Overlap test on expanded boxes
+        return not (x1a < x0b or x1b < x0a or y1a < y0b or y1b < y0a)
+
+    def merge_two(self, b1, b2):
+        return [
+            min(b1[0], b2[0]),
+            min(b1[1], b2[1]),
+            max(b1[2], b2[2]),
+            max(b1[3], b2[3]),
+        ]
+
+    def merge_boxes_iterative(self, boxes, thresh):
+        boxes = boxes[:]  # shallow copy
+        changed = True
+
+        while changed:
+            changed = False
+            merged = []
+            used = [False] * len(boxes)
+
+            for i in range(len(boxes)):
+                if used[i]:
+                    continue
+
+                current = boxes[i]
+
+                for j in range(i + 1, len(boxes)):
+                    if used[j]:
+                        continue
+
+                    if self.boxes_touch(current, boxes[j], thresh):
+                        current = self.merge_two(current, boxes[j])
+                        used[j] = True
+                        changed = True
+
+                used[i] = True
+                merged.append(current)
+
+            boxes = merged
+
+        return boxes
 
     def get_image_description(self, image_path):
         """
@@ -41,7 +99,7 @@ class PDFProcesser:
         :return: LLM generated description of the image, as string
         """
 
-        return self.llm_client.summarize_image(image_path, self.chunk_size)
+        return self.llm_client.describe_image(image_path, self.chunk_size)
 
     def get_page_drawings(self, pdf_assets_path, pdf_path, pdf_name, page_num, page):
         """
@@ -70,7 +128,7 @@ class PDFProcesser:
         min_img_x, min_img_y = self.min_image_size
 
         # Get drawings from page
-        drawings = page.get_drawings() or []
+        raw_drawings = page.get_drawings() or []
 
         # Initialize chunks to return list, drawing boundaries list, and drawing number
         chunks_to_return = []
@@ -81,17 +139,10 @@ class PDFProcesser:
         drawings_path = os.path.join(pdf_assets_path, "images")
         os.makedirs(drawings_path, exist_ok=True)
 
-        for drawing in drawings:
-
-            # Define the output path for the drawing image
-            drawing_name = "{}_p{}_drawing{}.{}".format(pdf_name, page_num, drawing_num, self.img_ext)
-            drawing_output_path = os.path.join(drawings_path, drawing_name)
-
-            # Get the drawing x0, y0, x1, y1 coordinates
+        for drawing in raw_drawings:
             drawing_coordinates = drawing['rect']
             x0, y0, x1, y1 = drawing_coordinates[0:4]
 
-            # Check if the drawing is too small
             if x1 - x0 < min_img_x or y1 - y0 < min_img_y:
                 continue
 
@@ -106,8 +157,17 @@ class PDFProcesser:
             if drawing_overlap_found:
                 continue
 
-            # Add the drawing boundary to the list
-            drawing_boundaries.append((x0, y0, x1, y1))
+            drawing_boundaries.append([x0, y0, x1, y1])
+
+        drawing_boundaries = self.merge_boxes_iterative(drawing_boundaries, self.max_image_discontinuity)
+
+        for drawing in drawing_boundaries:
+
+            # Define the output path for the drawing image
+            drawing_name = "{}_p{}_drawing{}.{}".format(pdf_name, page_num, drawing_num, self.img_ext)
+            drawing_output_path = os.path.join(drawings_path, drawing_name)
+
+            x0, y0, x1, y1 = drawing
 
             # Modify y0 to include the header, and get boundaries
             y0 = max(0, y0 - self.object_header_height)
@@ -125,6 +185,7 @@ class PDFProcesser:
                 {
                     "page_content": text,
                     "metadata": {
+                        "uuid": str(uuid.uuid4()),
                         "type": "drawing",
                         "source": pdf_path,
                         "page": page_num,
@@ -223,6 +284,7 @@ class PDFProcesser:
                     {
                         "page_content": text,
                         "metadata":{
+                            "uuid": str(uuid.uuid4()),
                             "type": "table",
                             "source": pdf_path,
                             "page": page_num,
@@ -275,7 +337,7 @@ class PDFProcesser:
 
         # Get the x0, y0, x1 coordinates of the whole page
         page_rect = page.rect
-        x0, y0, x1 = page_rect[0:3]
+        x0, y0, x1, y1 = page_rect[0:4]
 
         # Set the starting y for the text area at the top of the page (y0)
         text_area_start_y = y0
@@ -296,10 +358,11 @@ class PDFProcesser:
             if text.strip():
                 page_text.append(text)
 
-        # If there were no non-textual boundaries, simply extract the text from the whole page
-        if len(non_text_boundaries) == 0:
-            text = page.get_text("text") or ""
-            page_text = [text]
+        # Get the last text block, or whole page text if there were no non-textual boundaries
+        text_area = pymupdf.Rect(x0, text_area_start_y, x1, y1)
+        text = page.get_text("text", clip=text_area) or ""
+        if text.strip():
+            page_text.append(text)
 
         # Combine text, and chunk
         total_text = "\n".join(page_text)
@@ -311,6 +374,7 @@ class PDFProcesser:
                 {
                     "page_content": text,
                     "metadata": {
+                        "uuid": str(uuid.uuid4()),
                         "type": "text",
                         "source": pdf_path,
                         "page": page_num,
