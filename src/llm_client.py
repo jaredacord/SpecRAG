@@ -48,10 +48,12 @@ class LLMClient:
 
         logger.info("Describing image at: '{}'".format(image_file_path))
 
-        purpose = """You are an expert in NVMe flash storage devices and NVMe specifications.
+        purpose = """You are an expert in NVMe, NVMe-MI, PCIe, and storage specifications.
 
                     Your task is to generate a strictly factual, literal description of the provided image 
-                    so it can be stored in a vector database and later used to retrieve the same image.
+                    so it can be stored in a vector database and later used to retrieve the same image. 
+                    The description should focus on the content and meaning of the image, ad be grounded and 
+                    technical.
                     
                     Follow these rules:
                     
@@ -62,19 +64,29 @@ class LLMClient:
                     labels, colors, and relationships between elements.
                     4. Do NOT assume the image shows real hardware unless real hardware is visually present.
                     5. If something is unclear or ambiguous, state that it is unclear rather than guessing.
-                    6. The description must be approximately {} characters.
+                    6. If the image is mostly textual, read the text and provide a detailed technical summary as 
+                    part of the description.
+                    7. The description must be approximately {} characters.
                     
-                    Begin with: "This image shows..." and continue with a grounded, technical description.
                     """.format(chunk_size)
 
-        with open(image_file_path, "rb") as f:
-            image_bytes = f.read()
+        encoded_image = self.encode_image(image_file_path)
 
         messages = [
             SystemMessage(content=purpose),
             HumanMessage(
-                content="Image: ",
-                image=image_bytes
+                content=[
+                    {
+                        "type": "text",
+                        "text": "Describe the following image."
+                    },
+                    {
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:image/png;base64,{encoded_image}"
+                        }
+                    }
+                ]
             )
         ]
 
@@ -109,8 +121,11 @@ class LLMClient:
         return json.loads(response)
 
     def encode_image(self, image_path):
-        with open(image_path, "rb") as image_file:
-            return base64.b64encode(image_file.read()).decode("utf-8")
+
+        with open(image_path, "rb") as f:
+            image_bytes = f.read()
+
+        return base64.b64encode(image_bytes).decode("utf-8")
 
     def answer_with_context(self, query, relevent_chunks):
         logger.info(f"Answering question: '{query}', using {len(relevent_chunks)} refs.")

@@ -18,10 +18,13 @@ class LoggingConfig:
 class PDFProcessingConfig:
     chunk_size = 1024
     chunk_overlap = 128
-    object_header_height = 30
+    object_header_height = 24
+    object_footer_height = 30
     table_render_dpi = 120
     drawing_render_dpi = 120
-    max_image_discontinuity = 30
-    min_image_size = [10, 10]
+    page_header_range = 50
+    page_footer_range = 50
+    max_image_discontinuity = 60
+    min_image_size = [25, 25]
     img_ext = 'png'
     pdf_assets_dir = "data/pdf_assets"

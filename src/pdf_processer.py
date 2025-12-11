@@ -23,8 +23,11 @@ class PDFProcesser:
         self.chunk_size = PDFProcessingConfig.chunk_size
         self.drawing_render_dpi = PDFProcessingConfig.drawing_render_dpi
         self.img_ext = PDFProcessingConfig.img_ext
-        self.min_image_size = PDFProcessingConfig.min_image_size
+        self.min_img_x, self.min_img_y = PDFProcessingConfig.min_image_size
         self.object_header_height = PDFProcessingConfig.object_header_height
+        self.object_footer_height = PDFProcessingConfig.object_footer_height
+        self.page_header_range = PDFProcessingConfig.page_header_range
+        self.page_footer_range = PDFProcessingConfig.page_footer_range
         self.table_render_dpi = PDFProcessingConfig.table_render_dpi
         self.max_image_discontinuity = PDFProcessingConfig.max_image_discontinuity
 
@@ -91,6 +94,86 @@ class PDFProcesser:
 
         return boxes
 
+    def remove_itersection(self, boundaries, boundaries_to_remove):
+        """
+        This method removes all boundaries from 'boundaries' which overlap with any of the boundaries in
+        'boundaries_to_remove'.
+
+        :param boundaries: Initial list of boundaries, as list of [x0, y0, x1, y1] coordinates
+        :param boundaries_to_remove: List of boundaries to remove, as list of [x0, y0, x1, y1] coordinates
+        :return: List of boundaries, after removing intersections
+        """
+
+        boundaries_to_return = []
+
+        for boundary in boundaries:
+            overlap_found = False
+            for boundary_to_remove in boundaries_to_remove:
+                if self.boxes_touch(boundary, boundary_to_remove, 0):
+                    overlap_found = True
+                    break
+            if not overlap_found:
+                boundaries_to_return.append(boundary)
+
+        return boundaries_to_return
+
+    def is_table_valid(self, table, page):
+        x0, y0, x1, y1 = table.bbox
+        area = pymupdf.Rect(x0, y0, x1, y1)
+
+        width = x1 - x0
+        height = y1 - y0
+
+        # If table contains no content, reject it
+        if not (page.get_text("text", clip=area) or "").strip():
+            return False
+
+        # Table must have at least 2 columns non-empty columns
+        non_empty_columns = [name for name in table.header.names if name is not None and name.strip()!=""]
+        if table.col_count is None or len(non_empty_columns)<2:
+            return False
+
+        # If table is too large, reject it
+        if height > page.rect.height * 0.9:
+            return False
+
+        # Reject tables with no extracted text
+        if table.extract() is None or not table.extract():
+            return False
+
+        # If table is within page header or footer, reject it
+        if y0 < self.page_header_range or y1 > (page.rect[3] - self.page_footer_range):
+            return False
+
+        return True
+
+    def is_drawing_valid(self, drawing, page):
+
+        drawing_coordinates = drawing['rect']
+        x0, y0, x1, y1 = drawing_coordinates[0:4]
+        area = pymupdf.Rect(x0, y0, x1, y1)
+
+        width = x1 - x0
+        height = y1 - y0
+
+        # If drawing is an implementation note, reject it (PCI spec specific)
+        if page.get_text("text", clip=area).strip().lower().startswith("implementation note"):
+            return False
+
+        # If drawing is too small, reject it
+        if width < self.min_img_x or height < self.min_img_y:
+            return False
+
+        # If drawing is too large, reject it
+        if height > page.rect.height * 0.9:
+            return False
+
+        # If table is within page header or footer, reject it
+        if y0 < self.page_header_range or y1 > (page.rect[3] - self.page_footer_range):
+            return False
+
+        return True
+
     def get_image_description(self, image_path):
         """
         This method uses the LLM client to describe the image at the given path, is about self.chunk_size characters.
@@ -99,106 +182,9 @@ class PDFProcesser:
         :return: LLM generated description of the image, as string
         """
 
+        return "Sample Output"
+
         return self.llm_client.describe_image(image_path, self.chunk_size)
-
-    def get_page_drawings(self, pdf_assets_path, pdf_path, pdf_name, page_num, page):
-        """
-        Method to extract and save drawings from a PDF page.
-        Each drawing is saved as an image, and the corresponding chunk data is given as:
-            {
-                "page_content": <llm textual description of the drawing>,
-                "metadata": {
-                    "type": "drawing",
-                    "source": <path to PDF file as str>,
-                    "page": <page number as int>,
-                    "drawing_num": <drawing number by page as int>,
-                    "drawing_path": <path to saved image file>
-                }
-            }
-
-        :param pdf_assets_path: Path to directory where drawings will be saved
-        :param pdf_path: Path to PDF (used in metadata)
-        :param pdf_name: Name of PDF (used in file naming)
-        :param page_num: Doc page number (used in metadata), starting from 1
-        :param page: Page object from pymupdf
-        :return: (List of chunks, list of drawing boundaries)
-        """
-
-        # Get the min image size x, y
-        min_img_x, min_img_y = self.min_image_size
-
-        # Get drawings from page
-        raw_drawings = page.get_drawings() or []
-
-        # Initialize chunks to return list, drawing boundaries list, and drawing number
-        chunks_to_return = []
-        drawing_boundaries = []
-        drawing_num = 0
-
-        # Define drawings path, and create it if it doesn't exist
-        drawings_path = os.path.join(pdf_assets_path, "images")
-        os.makedirs(drawings_path, exist_ok=True)
-
-        for drawing in raw_drawings:
-            drawing_coordinates = drawing['rect']
-            x0, y0, x1, y1 = drawing_coordinates[0:4]
-
-            if x1 - x0 < min_img_x or y1 - y0 < min_img_y:
-                continue
-
-            # Since the pdf parser sometimes returns sub-drawings, skip if there exists a 'parent' drawing. Since the
-            # 'parent' drawing contains the sub-drawing, no data is lost
-            drawing_overlap_found = False
-            for drawing_boundary in drawing_boundaries:
-                x0_boundary, y0_boundary, x1_boundary, y1_boundary = drawing_boundary
-                if x0 >= x0_boundary and x1 <= x1_boundary and y0 >= y0_boundary and y1 <= y1_boundary:
-                    drawing_overlap_found = True
-                    break
-            if drawing_overlap_found:
-                continue
-
-            drawing_boundaries.append([x0, y0, x1, y1])
-
-        drawing_boundaries = self.merge_boxes_iterative(drawing_boundaries, self.max_image_discontinuity)
-
-        for drawing in drawing_boundaries:
-
-            # Define the output path for the drawing image
-            drawing_name = "{}_p{}_drawing{}.{}".format(pdf_name, page_num, drawing_num, self.img_ext)
-            drawing_output_path = os.path.join(drawings_path, drawing_name)
-
-            x0, y0, x1, y1 = drawing
-
-            # Modify y0 to include the header, and get boundaries
-            y0 = max(0, y0 - self.object_header_height)
-            drawing_rect = pymupdf.Rect(x0, y0, x1, y1)
-
-            # Save picture as image
-            drawing_image = page.get_pixmap(clip=drawing_rect, dpi=self.drawing_render_dpi)
-            drawing_image.save(drawing_output_path)
-
-            # Get LLM generated description of the drawing
-            text = self.get_image_description(drawing_output_path)
-
-            # Define the chunk data and append to the list
-            chunks_to_return.append(
-                {
-                    "page_content": text,
-                    "metadata": {
-                        "uuid": str(uuid.uuid4()),
-                        "type": "drawing",
-                        "source": pdf_path,
-                        "page": page_num,
-                        "drawing_num": drawing_num,
-                        "drawing_path": drawing_output_path
-                    }
-                }
-            )
-
-            drawing_num += 1
-
-        # Return chunks, and drawing boundaries
-        return chunks_to_return, drawing_boundaries
 
     def get_page_tables(self, pdf_assets_path, pdf_path, pdf_name, page_num, page):
         """
@@ -226,6 +212,10 @@ class PDFProcesser:
         :return: (List of chunks, list of table boundaries)
         """
 
+        # Get the x0, y0, x1 coordinates of the whole page
+        page_rect = page.rect
+        x0_page, y0_page, x1_page, y1_page = page_rect[0:4]
+
         # Extract tables from page
         tables = page.find_tables() or []
 
@@ -239,6 +229,10 @@ class PDFProcesser:
         os.makedirs(tables_path, exist_ok=True)
 
         for table in tables:
+
+            # Skip table if it is not valid
+            if not self.is_table_valid(table, page):
+                continue
 
             # Define the output path for the table image
             table_name = f"{pdf_name}_p{page_num}_table{table_num}.{self.img_ext}"
@@ -259,13 +253,17 @@ class PDFProcesser:
             if table_overlap_found:
                 continue
 
+            # Extend table boundaries to fill page horizontally
+            x0 = x0_page
+            x1 = x1_page
+
             # Add the drawing boundary to the list
             table_boundaries.append((x0, y0, x1, y1))
 
             # Define the boundaries for the table, header, and table + header
             table_rect = pymupdf.Rect(x0, y0, x1, y1)
             header_rect = pymupdf.Rect(x0, y0-self.object_header_height, x1, y0)
-            table_with_header_rect = pymupdf.Rect(x0, max(0, y0-self.object_header_height), x1, y1)
+            table_with_header_footer_rect = pymupdf.Rect(x0, max(y0_page, y0 - self.object_header_height), x1, min(y1_page, y1 + self.object_footer_height))
 
             # Get the header text and table text
             table_header_text = page.get_text("text", clip=header_rect) or ""
@@ -296,13 +294,122 @@ class PDFProcesser:
                 )
 
             # Save table as image (including header)
-            table_image = page.get_pixmap(clip=table_with_header_rect, dpi=self.table_render_dpi)
+            table_image = page.get_pixmap(clip=table_with_header_footer_rect, dpi=self.table_render_dpi)
             table_image.save(table_output_path)
 
             table_num += 1
 
         # Return chunks, and table boundaries
         return chunks_to_return, table_boundaries
+
+    def get_page_drawings(self, pdf_assets_path, pdf_path, pdf_name, page_num, page, table_boundaries):
+        """
+        Method to extract and save drawings from a PDF page.
+        Each drawing is saved as an image, and the corresponding chunk data is given as:
+            {
+                "page_content": <llm textual description of the drawing>,
+                "metadata": {
+                    "type": "drawing",
+                    "source": <path to PDF file as str>,
+                    "page": <page number as int>,
+                    "drawing_num": <drawing number by page as int>,
+                    "drawing_path": <path to saved image file>
+                }
+            }
+
+        :param pdf_assets_path: Path to directory where drawings will be saved
+        :param pdf_path: Path to PDF (used in metadata)
+        :param pdf_name: Name of PDF (used in file naming)
+        :param page_num: Doc page number (used in metadata), starting from 1
+        :param page: Page object from pymupdf
+        :return: (List of chunks, list of drawing boundaries)
+        """
+
+        # Get the x0, y0, x1 coordinates of the whole page
+        page_rect = page.rect
+        x0_page, y0_page, x1_page, y1_page = page_rect[0:4]
+
+        # Get drawings from page
+        raw_drawings = page.get_drawings() or []
+
+        # Initialize chunks to return list, drawing boundaries list, and drawing number
+        chunks_to_return = []
+        drawing_boundaries = []
+        drawing_num = 0
+
+        # Define drawings path, and create it if it doesn't exist
+        drawings_path = os.path.join(pdf_assets_path, "images")
+        os.makedirs(drawings_path, exist_ok=True)
+
+        for drawing in raw_drawings:
+
+            if not self.is_drawing_valid(drawing, page):
+                continue
+
+            drawing_coordinates = drawing['rect']
+            x0, y0, x1, y1 = drawing_coordinates[0:4]
+
+            # Since the pdf parser sometimes returns sub-drawings, skip if there exists a 'parent' drawing. Since the
+            # 'parent' drawing contains the sub-drawing, no data is lost
+            drawing_overlap_found = False
+            for drawing_boundary in drawing_boundaries:
+                x0_boundary, y0_boundary, x1_boundary, y1_boundary = drawing_boundary
+                if x0 >= x0_boundary and x1 <= x1_boundary and y0 >= y0_boundary and y1 <= y1_boundary:
+                    drawing_overlap_found = True
+                    break
+
+            if drawing_overlap_found:
+                continue
+
+            drawing_boundaries.append([x0, y0, x1, y1])
+
+        drawing_boundaries = self.remove_itersection(drawing_boundaries, table_boundaries)
+
+        drawing_boundaries = self.merge_boxes_iterative(drawing_boundaries, self.max_image_discontinuity)
+
+        for drawing in drawing_boundaries:
+
+            # Define the output path for the drawing image
+            drawing_name = "{}_p{}_drawing{}.{}".format(pdf_name, page_num, drawing_num, self.img_ext)
+            drawing_output_path = os.path.join(drawings_path, drawing_name)
+
+            x0, y0, x1, y1 = drawing
+
+            # Extend table boundaries to fill page horizontally
+            x0 = x0_page
+            x1 = x1_page
+
+            # Modify y0 to include the header, and get boundaries
+            y0 = max(y0_page, y0 - self.object_header_height)
+            y1 = min(y1_page, y1 + self.object_footer_height)
+            drawing_rect = pymupdf.Rect(x0, y0, x1, y1)
+
+            # Save picture as image
+            drawing_image = page.get_pixmap(clip=drawing_rect, dpi=self.drawing_render_dpi)
+            drawing_image.save(drawing_output_path)
+
+            # Get LLM generated description of the drawing
+            text = self.get_image_description(drawing_output_path)
+
+            # Define the chunk data and append to the list
+            chunks_to_return.append(
+                {
+                    "page_content": text,
+                    "metadata": {
+                        "uuid": str(uuid.uuid4()),
+                        "type": "drawing",
+                        "source": pdf_path,
+                        "page": page_num,
+                        "drawing_num": drawing_num,
+                        "drawing_path": drawing_output_path
+                    }
+                }
+            )
+
+            drawing_num += 1
+
+        # Return chunks, and drawing boundaries
+        return chunks_to_return, drawing_boundaries
 
     def get_page_text(self, pdf_path, page_num, page, non_text_boundaries):
         """
@@ -338,6 +445,10 @@ class PDFProcesser:
         # Get the x0, y0, x1 coordinates of the whole page
         page_rect = page.rect
         x0, y0, x1, y1 = page_rect[0:4]
+
+        # Restrict view to within page header and footer
+        y0 += self.page_header_range
+        y1 -= self.page_footer_range
 
         # Set the starting y for the text area at the top of the page (y0)
         text_area_start_y = y0
@@ -414,13 +525,15 @@ class PDFProcesser:
         with pymupdf.open(pdf_path) as pdf:
             for page_num, page in enumerate(pdf, start=1):
 
-                # Get the drawings chunks from the page, and add them to the list
-                drawing_chunks, drawing_boundaries = self.get_page_drawings(pdf_assets_path, pdf_path, pdf_name, page_num, page)
-                all_chunks.extend(drawing_chunks)
-
                 # Get the tables chunks from the page, and add them to the list
-                table_chunks, table_boundaries = self.get_page_tables(pdf_assets_path, pdf_path, pdf_name, page_num, page)
+                table_chunks, table_boundaries = self.get_page_tables(pdf_assets_path, pdf_path, pdf_name, page_num,
+                                                                      page)
                 all_chunks.extend(table_chunks)
+
+                # Get the drawings chunks from the page, and add them to the list
+                drawing_chunks, drawing_boundaries = self.get_page_drawings(pdf_assets_path, pdf_path, pdf_name,
+                                                                            page_num, page, table_boundaries)
+                all_chunks.extend(drawing_chunks)
 
                 # Compile the non-textual boundaries
                 non_text_boundaries = drawing_boundaries + table_boundaries

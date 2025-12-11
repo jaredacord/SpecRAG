@@ -38,7 +38,7 @@ class main:
         )
 
     def start(self):
-        self.setup()
+        self.tests()
 
     def setup(self):
 
@@ -64,18 +64,22 @@ class main:
     def tests(self):
         pdf_processer = PDFProcesser()
 
-        #pdf = "data/pdfs/NVMe-Base-2.0d.pdf"
-        #pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
-        pdf = "data/pdfs/NVMe-Base-2.0d-image-test.pdf"
+        #pdf = "data/pdfs/PCI_Express_5.0.pdf"
+        #pdf = "data/pdfs/PCI_Express_5.0_image_test.pdf"
+        pdf = "data/pdfs/NVMe-Base-2.0d-small.pdf"
+        #pdf = "data/pdfs/NVMe-Base-2.0d-image-test.pdf"
         #pdf = "data/pdfs/SinglePage.pdf"
 
         chunks = pdf_processer.pdf_to_chunks(pdf)
 
         chunks_by_page = []
-        for i in range(1, 16):
+        start_page = 1
+        number_of_pages = 2
+
+        for i in range(start_page, start_page+number_of_pages):
             chunks_by_page.append(chunk for chunk in chunks if chunk["metadata"]["page"] == i)
 
-        for i, chunk_by_page in enumerate(chunks_by_page, start=1):
+        for i, chunk_by_page in enumerate(chunks_by_page, start=start_page):
             print(f"=== Page {i} =====")
 
             tables = []
