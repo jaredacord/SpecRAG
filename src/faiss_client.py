@@ -14,51 +14,87 @@ from config import FAISSConfig
 class FAISSClient:
     def __init__(self):
 
-        logger.info("Initializing FAISS Client")
-
-        logger.info("Loading embedding model {}...".format(FAISSConfig.embedding_model))
-        self.embeddings = GoogleGenerativeAIEmbeddings(model=FAISSConfig.embedding_model)
-
+        # Initialize a PDF processor
         self.pdf_processer = PDFProcesser()
 
-        self.chunk_group_limit = FAISSConfig.chunk_group_limit
-        self.seconds_between_chunks_groups = FAISSConfig.seconds_between_chunks_groups
+        # Define the google generative AI embeddings
+        self.embeddings = GoogleGenerativeAIEmbeddings(model=FAISSConfig.embedding_model)
 
+        # Get relevant config values
+        self.chunk_batch_limit = FAISSConfig.chunk_batch_limit
+        self.seconds_between_chunks_batches = FAISSConfig.seconds_between_chunks_batches
+
+        # Define the FAISS store path, and load
         self.storage_path = FAISSConfig.storage_path
         self.store = self.load_faiss_store()
 
     def ingest_pdf(self, path):
-        logger.info("Ingesting PDF {}...".format(path))
+        """
+        Method to ingest a PDF into the FAISS store. Since RPM is an issue, we split the PDF chunks into batches, which
+        are added to the FAISS store one by one, with a delay between each batch.
+
+        :param path: Path to the PDF file
+        :return: None
+        """
+
+        logger.info("Ingesting PDF {} with chunk batch size {} and {} seconds between each group..."
+                    "".format(path, self.chunk_batch_limit, self.seconds_between_chunks_batches))
+
+        # First, extract chunks from the PDF, and split into groups
         chunks = self.pdf_processer.pdf_to_chunks(path)
+        chunk_batches = [chunks[i:i + self.chunk_batch_limit] for i in range(0, len(chunks), self.chunk_batch_limit)]
 
-        chunk_groupings = [chunks[i:i + self.chunk_group_limit] for i in range(0, len(chunks), self.chunk_group_limit)]
+        # Then, add each group to the FAISS store
+        for chunk_batch_number, chunk_batch in enumerate(chunk_batches):
+            logger.info("\tChunk group {} of {}...".format(chunk_batch_number + 1, len(chunk_batches)))
+            self.add_to_faiss_store(chunk_batch)
+            time.sleep(self.seconds_between_chunks_batches)
 
-        for chunk_group_number, chunk_group in enumerate(chunk_groupings):
-            logger.info("Chunk group {} of {}...".format(chunk_group_number + 1, len(chunk_groupings)))
-            self.add_to_faiss_store(chunk_group)
-            time.sleep(self.seconds_between_chunks_groups)
+        # Finally, save the FAISS store to disk
+        self.save_faiss_store()
 
     def add_to_faiss_store(self, chunks):
+        """
+        Method to add chunks to the FAISS store.
 
+        :param chunks: List of chunks to add
+        :return: None
+        """
+
+        # Extract contents and metadatas from chunks
         contents = [chunk["page_content"] for chunk in chunks]
         metadatas = [chunk["metadata"] for chunk in chunks]
 
-        logger.info("Adding {} chunks to FAISS store...".format(len(chunks)))
+        logger.info("\tAdding {} chunks to FAISS store...".format(len(chunks)))
+
+        # Is store exists, add chunks to it, otherwise create a new store
         if self.store is not None:
             self.store.add_texts(texts=contents, embedding=self.embeddings, metadatas=metadatas)
-
-            logger.info("FAISS store updated successfully.")
+            logger.info("\tFAISS store updated successfully.")
 
         else:
             self.store = FAISS.from_texts(texts=contents, embedding=self.embeddings, metadatas=metadatas)
-            logger.info("FAISS store created and updated successfully.")
+            logger.info("\tFAISS store created and updated successfully.")
 
+    def save_faiss_store(self):
+        """
+        Method to save the FAISS store to disk.
+
+        :return: None
+        """
+        logger.info("Saving FAISS store to {}...".format(self.storage_path))
         self.store.save_local(self.storage_path)
         logger.info("FAISS store saved to {} successfully.".format(self.storage_path))
 
     def load_faiss_store(self):
+        """
+        Method to load the FAISS store from disk.
+        :return: FAISS store object
+        """
 
         logger.info("Loading FAISS store from {}...".format(self.storage_path))
+
+        # If the FAISS store exists, load it, otherwise return None
         if os.path.exists(self.storage_path):
             store = FAISS.load_local(self.storage_path, self.embeddings, allow_dangerous_deserialization=True)
             logger.info("FAISS store loaded successfully.")
@@ -70,6 +106,14 @@ class FAISSClient:
         return store
 
     def retrieve(self, query, top_n=3):
+        """
+        Method to retrieve the top N chunks from the FAISS store based on a query.
+
+        :param query: Query, as string
+        :param top_n: Number of chunks to retrieve
+        :return: List of top N chunks
+        """
+
         results = self.store.similarity_search(query, k=top_n)
         logger.info("Retrieved {} chunks".format(top_n))
         return results

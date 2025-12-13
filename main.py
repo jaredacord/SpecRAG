@@ -1,4 +1,6 @@
+import json
 import time
+from collections import defaultdict
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -37,13 +39,78 @@ class main:
             ]
         )
 
+    def get_context_and_answer(self, query):
+        """
+        Method to retrieve relevant chunks from the FAISS store and answer the query using the retrieved context
+
+        :param query: Query, as string
+        :return: answer as string, chunks as list of retrieved chunks
+        """
+
+        relevant_chunks = self.faiss_client.retrieve(query, top_n=5)
+        return self.llm_client.answer_with_context(query, relevant_chunks)
+
+    def get_context_and_answer_rrf(self, query):
+
+        top_n = 5
+        expansive_queries = self.llm_client.generate_questions(query)
+        all_queries = [query] + expansive_queries
+        all_query_chunks = [self.faiss_client.retrieve(query, top_n=top_n) for query in all_queries]
+        fused_queries = self.rrf_fusion(all_query_chunks, k=60, top_n=15)
+
+        response, contexts = self.llm_client.answer_with_context(query, fused_queries)
+
+        return response, expansive_queries, contexts
+
+    def rrf_fusion(self, ranked_lists, k=60, top_n=None):
+        """
+        Apply Reciprocal Rank Fusion (RRF) to multiple ranked retrieval result lists.
+
+        Args:
+            ranked_lists (List[List[Document]]):
+                List of ranked lists from similarity_search.
+            k (int):
+                RRF constant (larger = less aggressive rank decay).
+                Typical values: 50–60.
+            top_n (int | None):
+                Optionally limit output to top N fused results.
+
+        Returns:
+            List[Document]: RRF-ranked, deduplicated list of chunks.
+        """
+        scores = defaultdict(float)
+        chunk_by_id = {}
+
+        for results in ranked_lists:
+            for rank, chunk in enumerate(results):
+                uid = chunk.metadata.get("uuid")
+                if uid is None:
+                    raise ValueError("Chunk missing metadata['uuid']")
+
+                # Store canonical chunk instance
+                chunk_by_id[uid] = chunk
+
+                # RRF score contribution
+                scores[uid] += 1.0 / (k + rank + 1)
+
+        # Sort by fused RRF score (descending)
+        ranked_ids = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+        fused = [chunk_by_id[uid] for uid, _ in ranked_ids]
+
+        if top_n is not None:
+            fused = fused[:top_n]
+
+        return fused
+
     def start(self):
-        self.tests()
+        self.usage()
 
     def setup(self):
 
         pdfs = [
-            "data/pdfs/NVMe-Base-2.0d.pdf",
+            #"data/pdfs/NVMe-Base-2.0d.pdf",
+            #"data/pdfs/NVMe-Base-2.0d-small.pdf",
             #"data/pdfs/NVMe-MI-1.2c.pdf"
                 ]
         for pdf in pdfs:
@@ -52,14 +119,29 @@ class main:
     def usage(self):
 
         #query = "Where can I look for more information on the path relates status code?"
-        query = "What information does a smart log contain? How is a smart log obtained?"
+        #query = "What values can I use for a fw commit action?"
+        query = "How do I commit firmware that has been downloaded to an SSD?"
 
-        relevent_chunks = self.faiss_client.retrieve(query, top_n=5)
-        response = self.llm_client.answer_with_context(query, relevent_chunks)
+        print("========= Without Query Expansion =========")
+        response, contexts = self.get_context_and_answer(query)
         print("Query: {}\n".format(query))
-        print("Answer: {}\n".format(response["answer"]))
-        for i, chunk in enumerate(response["chunks"]):
-            print(chunk)
+        print("Answer: {}\n".format(response))
+
+        print("=====Relevant chunks====")
+        for i, context in enumerate(contexts):
+            print(json.dumps(context.metadata))
+
+
+        print("\n\n========= With Query Expansion =========")
+        response, expansive_queries, contexts = self.get_context_and_answer_rrf(query)
+        print("Query: {}\n".format(query))
+        for i, query in enumerate(expansive_queries, start=1):
+            print("Additional Query Generated {}: {}".format(i, query))
+        print("Answer: {}\n".format(response))
+
+        print("=====Relevant chunks====")
+        for i, context in enumerate(contexts):
+            print(json.dumps(context.metadata))
 
     def tests(self):
         pdf_processer = PDFProcesser()
@@ -74,7 +156,7 @@ class main:
 
         chunks_by_page = []
         start_page = 1
-        number_of_pages = 2
+        number_of_pages = 15
 
         for i in range(start_page, start_page+number_of_pages):
             chunks_by_page.append(chunk for chunk in chunks if chunk["metadata"]["page"] == i)

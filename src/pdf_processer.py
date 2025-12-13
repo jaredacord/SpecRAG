@@ -8,6 +8,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 from config import PDFProcessingConfig
 from src.llm_client import LLMClient
+from utils.pdf_processor_utils import PDFProcessorUtils
 
 logger = logging.getLogger(__name__)
 
@@ -17,6 +18,9 @@ class PDFProcesser:
 
         # Initialize LLM client
         self.llm_client = LLMClient()
+
+        # Initialize pdf processor utils
+        self.pdf_processor_utils = PDFProcessorUtils()
 
         # Get relevant config values
         self.chunk_overlap = PDFProcessingConfig.chunk_overlap
@@ -38,142 +42,6 @@ class PDFProcesser:
             separators=["\n\n", "\n", " ", ""]
         )
 
-    def boxes_touch(self, b1, b2, thresh):
-        x0a, y0a, x1a, y1a = b1
-        x0b, y0b, x1b, y1b = b2
-
-        # Expand boxes by threshold to test adjacency
-        x0a -= thresh;
-        y0a -= thresh;
-        x1a += thresh;
-        y1a += thresh
-        x0b -= thresh;
-        y0b -= thresh;
-        x1b += thresh;
-        y1b += thresh
-
-        # Overlap test on expanded boxes
-        return not (x1a < x0b or x1b < x0a or y1a < y0b or y1b < y0a)
-
-    def merge_two(self, b1, b2):
-        return [
-            min(b1[0], b2[0]),
-            min(b1[1], b2[1]),
-            max(b1[2], b2[2]),
-            max(b1[3], b2[3]),
-        ]
-
-    def merge_boxes_iterative(self, boxes, thresh):
-        boxes = boxes[:]  # shallow copy
-        changed = True
-
-        while changed:
-            changed = False
-            merged = []
-            used = [False] * len(boxes)
-
-            for i in range(len(boxes)):
-                if used[i]:
-                    continue
-
-                current = boxes[i]
-
-                for j in range(i + 1, len(boxes)):
-                    if used[j]:
-                        continue
-
-                    if self.boxes_touch(current, boxes[j], thresh):
-                        current = self.merge_two(current, boxes[j])
-                        used[j] = True
-                        changed = True
-
-                used[i] = True
-                merged.append(current)
-
-            boxes = merged
-
-        return boxes
-
-    def remove_itersection(self, boundaries, boundaries_to_remove):
-        """
-        This method removes all boundaries from 'boundaries' which overlap with any of the boundaries in
-        'boundaries_to_remove'.
-
-        :param boundaries: Initial list of boundaries, as list of [x0, y0, x1, y1] coordinates
-        :param boundaries_to_remove: List of boundaries to remove, as list of [x0, y0, x1, y1] coordinates
-        :return: List of boundaries, after removing intersections
-        """
-
-        boundaries_to_return = []
-
-        for boundary in boundaries:
-            overlap_found = False
-            for boundary_to_remove in boundaries_to_remove:
-                if self.boxes_touch(boundary, boundary_to_remove, 0):
-                    overlap_found = True
-                    break
-            if not overlap_found:
-                boundaries_to_return.append(boundary)
-
-        return boundaries_to_return
-
-    def is_table_valid(self, table, page):
-        x0, y0, x1, y1 = table.bbox
-        area = pymupdf.Rect(x0, y0, x1, y1)
-
-        width = x1 - x0
-        height = y1 - y0
-
-        # If table contains no content, reject it
-        if not (page.get_text("text", clip=area) or "").strip():
-            return False
-
-        # Table must have at least 2 columns non-empty columns
-        non_empty_columns = [name for name in table.header.names if name is not None and name.strip()!=""]
-        if table.col_count is None or len(non_empty_columns)<2:
-            return False
-
-        # If table is too large, reject it
-        if height > page.rect.height * 0.9:
-            return False
-
-        # Reject tables with no extracted text
-        if table.extract() is None or not table.extract():
-            return False
-
-        # If table is within page header or footer, reject it
-        if y0 < self.page_header_range or y1 > (page.rect[3] - self.page_footer_range):
-            return False
-
-        return True
-
-    def is_drawing_valid(self, drawing, page):
-
-        drawing_coordinates = drawing['rect']
-        x0, y0, x1, y1 = drawing_coordinates[0:4]
-        area = pymupdf.Rect(x0, y0, x1, y1)
-
-        width = x1 - x0
-        height = y1 - y0
-
-        # If drawing is an implementation note, reject it (PCI spec specific)
-        if page.get_text("text", clip=area).strip().lower().startswith("implementation note"):
-            return False
-
-        # If drawing is too small, reject it
-        if width < self.min_img_x or height < self.min_img_y:
-            return False
-
-        # If drawing is too large, reject it
-        if height > page.rect.height * 0.9:
-            return False
-
-        # If table is within page header or footer, reject it
-        if y0 < self.page_header_range or y1 > (page.rect[3] - self.page_footer_range):
-            return False
-
-        return True
-
     def get_image_description(self, image_path):
         """
         This method uses the LLM client to describe the image at the given path, is about self.chunk_size characters.
@@ -181,8 +49,6 @@ class PDFProcesser:
         :param image_path: image path, as string
         :return: LLM generated description of the image, as string
         """
-
-        return "Sample Output"
 
         return self.llm_client.describe_image(image_path, self.chunk_size)
 
@@ -196,8 +62,10 @@ class PDFProcesser:
             {
                 "page_content": <text extracted from the table>,
                 "metadata":{
+                    "uuid": <generated uuid4 string>,
                     "type": "table",
                     "source": <path to PDF file as str>,
+                    "pdf_name": <pdf_name as str>,
                     "page": <page number as int>,
                     "table_num": <table number by page as int>,
                     "table_path": <path to saved image file>,
@@ -231,7 +99,7 @@ class PDFProcesser:
         for table in tables:
 
             # Skip table if it is not valid
-            if not self.is_table_valid(table, page):
+            if not self.pdf_processor_utils.is_table_valid(table, page):
                 continue
 
             # Define the output path for the table image
@@ -260,7 +128,7 @@ class PDFProcesser:
             # Add the drawing boundary to the list
             table_boundaries.append((x0, y0, x1, y1))
 
-            # Define the boundaries for the table, header, and table + header
+            # Define the boundaries for the table, header, and table + header + footer
             table_rect = pymupdf.Rect(x0, y0, x1, y1)
             header_rect = pymupdf.Rect(x0, y0-self.object_header_height, x1, y0)
             table_with_header_footer_rect = pymupdf.Rect(x0, max(y0_page, y0 - self.object_header_height), x1, min(y1_page, y1 + self.object_footer_height))
@@ -285,6 +153,7 @@ class PDFProcesser:
                             "uuid": str(uuid.uuid4()),
                             "type": "table",
                             "source": pdf_path,
+                            "pdf_name": pdf_name,
                             "page": page_num,
                             "table_num": table_num,
                             "table_path": table_output_path,
@@ -299,6 +168,9 @@ class PDFProcesser:
 
             table_num += 1
 
+        # Just in case, remove empty chunks
+        chunks_to_return = [chunk for chunk in chunks_to_return if chunk.get("page_content").strip()]
+
         # Return chunks, and table boundaries
         return chunks_to_return, table_boundaries
 
@@ -309,8 +181,10 @@ class PDFProcesser:
             {
                 "page_content": <llm textual description of the drawing>,
                 "metadata": {
+                    "uuid": <generated uuid4 string>,
                     "type": "drawing",
                     "source": <path to PDF file as str>,
+                    "pdf_name": <pdf_name as str>,
                     "page": <page number as int>,
                     "drawing_num": <drawing number by page as int>,
                     "drawing_path": <path to saved image file>
@@ -322,6 +196,7 @@ class PDFProcesser:
         :param pdf_name: Name of PDF (used in file naming)
         :param page_num: Doc page number (used in metadata), starting from 1
         :param page: Page object from pymupdf
+        :param table_boundaries:
         :return: (List of chunks, list of drawing boundaries)
         """
 
@@ -343,7 +218,7 @@ class PDFProcesser:
 
         for drawing in raw_drawings:
 
-            if not self.is_drawing_valid(drawing, page):
+            if not self.pdf_processor_utils.is_drawing_valid(drawing, page):
                 continue
 
             drawing_coordinates = drawing['rect']
@@ -363,9 +238,9 @@ class PDFProcesser:
 
             drawing_boundaries.append([x0, y0, x1, y1])
 
-        drawing_boundaries = self.remove_itersection(drawing_boundaries, table_boundaries)
+        drawing_boundaries = self.pdf_processor_utils.remove_itersection(drawing_boundaries, table_boundaries)
 
-        drawing_boundaries = self.merge_boxes_iterative(drawing_boundaries, self.max_image_discontinuity)
+        drawing_boundaries = self.pdf_processor_utils.merge_boxes_iterative(drawing_boundaries, self.max_image_discontinuity)
 
         for drawing in drawing_boundaries:
 
@@ -399,6 +274,7 @@ class PDFProcesser:
                         "uuid": str(uuid.uuid4()),
                         "type": "drawing",
                         "source": pdf_path,
+                        "pdf_name": pdf_name,
                         "page": page_num,
                         "drawing_num": drawing_num,
                         "drawing_path": drawing_output_path
@@ -408,10 +284,13 @@ class PDFProcesser:
 
             drawing_num += 1
 
+        # Just in case, remove empty chunks
+        chunks_to_return = [chunk for chunk in chunks_to_return if chunk.get("page_content").strip()]
+
         # Return chunks, and drawing boundaries
         return chunks_to_return, drawing_boundaries
 
-    def get_page_text(self, pdf_path, page_num, page, non_text_boundaries):
+    def get_page_text(self, pdf_path, pdf_name, page_num, page, non_text_boundaries):
         """
         Method to extract text from a PDF page. Since the page content includes drawings, tables, and so on with
         textual aspects, we first filter out the non-textual portions of the page (since the information is already
@@ -421,14 +300,17 @@ class PDFProcesser:
             {
                 "page_content": <extracted text>,
                 "metadata": {
+                    "uuid": <generated uuid4 string>,
                     "type": "text",
                     "source": <path to PDF file as str>,
+                    "pdf_name": <pdf_name as str>,
                     "page": <page number as int>,
                     "chunk_index": <index of chunk within page as int>
                 }
             }
 
         :param pdf_path: Path to PDF (used in metadata)
+        :param pdf_name: Name of PDF (used in metadata)
         :param page_num: Doc page number (used in metadata), starting from 1
         :param page: Page object from pymupdf
         :param non_text_boundaries: List of boundaries for non-textual portions of the page
@@ -488,11 +370,15 @@ class PDFProcesser:
                         "uuid": str(uuid.uuid4()),
                         "type": "text",
                         "source": pdf_path,
+                        "pdf_name": pdf_name,
                         "page": page_num,
                         "chunk_index": i
                     }
                 }
             )
+
+        # Just in case, remove empty chunks
+        chunks_to_return = [chunk for chunk in chunks_to_return if chunk.get("page_content").strip()]
 
         # Return chunks
         return chunks_to_return
@@ -539,7 +425,7 @@ class PDFProcesser:
                 non_text_boundaries = drawing_boundaries + table_boundaries
 
                 # Get the text chunks from the page, and add them to the list
-                text_chunks = self.get_page_text(pdf_path, page_num, page, non_text_boundaries)
+                text_chunks = self.get_page_text(pdf_path, pdf_name, page_num, page, non_text_boundaries)
                 all_chunks.extend(text_chunks)
 
         # Stop timer, and get duration

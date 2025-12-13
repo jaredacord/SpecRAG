@@ -8,8 +8,8 @@ class LLMConfig:
 class FAISSConfig:
     storage_path = "data/faiss_index"
     embedding_model = "models/gemini-embedding-001"
-    chunk_group_limit = 1000
-    seconds_between_chunks_groups = 5
+    chunk_batch_limit = 1000
+    seconds_between_chunks_batches = 15
 
 class LoggingConfig:
     logging_level = logging.INFO
