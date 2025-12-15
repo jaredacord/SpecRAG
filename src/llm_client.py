@@ -9,29 +9,22 @@ logger = logging.getLogger(__name__)
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from config import LLMConfig
-
-
 class LLMClient:
 
-    def __init__(self):
+    def __init__(self, config):
 
-        logger.info("Initializing LLM Client")
+        self.config = config
 
         if "GOOGLE_API_KEY" not in os.environ:
             raise RuntimeError("GOOGLE_API_KEY environment variable must be set.")
 
-        logger.info("Google API key GOOGLE_API_KEY found")
-
-        self.model_name = LLMConfig.model_name
-        self.temperature = LLMConfig.temperature
+        self.model_name = self.config.llm_model_name
+        self.temperature = self.config.llm_temperature
 
         self.model = ChatGoogleGenerativeAI(
             model=self.model_name,
             temperature=self.temperature
         )
-
-        logger.info("Model defined with model name: {}, temperature: {}".format(self.model_name, str(self.temperature)))
 
     def query_llm(self, origin, message):
         """
@@ -62,8 +55,6 @@ class LLMClient:
         :param chunk_size: Desired chunk size, in characters
         :return: Textual description of the image, as string
         """
-
-        logger.info("Describing image at: '{}'".format(image_file_path))
 
         # Define the purpose of the LLM, used as a system message
         purpose = """You are an expert in NVMe, NVMe-MI, PCIe, and other storage specifications.
@@ -112,6 +103,12 @@ class LLMClient:
 
         # Query LLM and return response
         response = self.query_llm("describe_image", messages)
+
+        # Log response as well for tracability
+        logger.info("Image at '{}' has the following description: '{}'"
+                    "".format(image_file_path,
+                              response.replace('\n', ' ').replace('\r', ' ')))
+
         return response
 
     def generate_questions(self, query):
@@ -180,7 +177,7 @@ class LLMClient:
                      3. For images that are mostly textual, read the text and use it as context in addition to the image.
                      4. If information is missing, say so.
                      5. You MUST include the relevant context for each portion of your response, surrounded by 
-                        parenthesis, for example '(context 4,6)' 
+                        parenthesis, for example '(NVMe-Base-2.0d, page 14)' or '(NVMe-Base-2.0d, pages 121,142)'. 
     
                      CONTEXT:
                      
@@ -195,10 +192,10 @@ class LLMClient:
 
             chunk_type = metadata.get("type", "text")
 
-            metadata_string = "Type: {}, Source: {}, Page: {}".format(chunk_type, metadata["source"], metadata["page"])
+            metadata_string = "Type: {}, Source: {}, Page: {}".format(chunk_type, metadata["pdf_name"], metadata["page"])
 
             human_message_content.extend([
-                {"type": "text", "text": "CONTEXT #{}".format(i+1)},
+                {"type": "text", "text": "CONTEXT from {}, page {}".format(metadata["pdf_name"], metadata["page"])},
                 {"type": "text", "text": "Metadata - {}".format(metadata_string)}
             ])
 

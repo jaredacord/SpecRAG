@@ -6,34 +6,34 @@ import uuid
 import pymupdf
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from config import PDFProcessingConfig
-from src.llm_client import LLMClient
 from utils.pdf_processor_utils import PDFProcessorUtils
 
 logger = logging.getLogger(__name__)
 
-class PDFProcesser:
+class PDFProcessor:
 
-    def __init__(self):
+    def __init__(self, llm_client, config):
 
-        # Initialize LLM client
-        self.llm_client = LLMClient()
+        self.config = config
+
+        # Set the LLM client
+        self.llm_client = llm_client
 
         # Initialize pdf processor utils
-        self.pdf_processor_utils = PDFProcessorUtils()
+        self.pdf_processor_utils = PDFProcessorUtils(self.config)
 
         # Get relevant config values
-        self.chunk_overlap = PDFProcessingConfig.chunk_overlap
-        self.chunk_size = PDFProcessingConfig.chunk_size
-        self.drawing_render_dpi = PDFProcessingConfig.drawing_render_dpi
-        self.img_ext = PDFProcessingConfig.img_ext
-        self.min_img_x, self.min_img_y = PDFProcessingConfig.min_image_size
-        self.object_header_height = PDFProcessingConfig.object_header_height
-        self.object_footer_height = PDFProcessingConfig.object_footer_height
-        self.page_header_range = PDFProcessingConfig.page_header_range
-        self.page_footer_range = PDFProcessingConfig.page_footer_range
-        self.table_render_dpi = PDFProcessingConfig.table_render_dpi
-        self.max_image_discontinuity = PDFProcessingConfig.max_image_discontinuity
+        self.chunk_overlap = self.config.chunk_overlap
+        self.chunk_size = self.config.chunk_size
+        self.drawing_render_dpi = self.config.drawing_render_dpi
+        self.img_ext = self.config.img_ext
+        self.min_img_x, self.min_img_y = self.config.min_image_size
+        self.object_header_height = self.config.object_header_height
+        self.object_footer_height = self.config.object_footer_height
+        self.page_header_range = self.config.page_header_range
+        self.page_footer_range = self.config.page_footer_range
+        self.table_render_dpi = self.config.table_render_dpi
+        self.max_image_discontinuity = self.config.max_image_discontinuity
 
         # Define the text splitter, used in chunking
         self.text_splitter = RecursiveCharacterTextSplitter(
@@ -402,7 +402,7 @@ class PDFProcesser:
 
         # Get the pdf name, and define and create assets subdirectory
         pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        pdf_assets_path = os.path.join(PDFProcessingConfig.pdf_assets_dir, pdf_name)
+        pdf_assets_path = os.path.join(self.config.pdf_assets_dir, pdf_name)
         os.makedirs(pdf_assets_path, exist_ok=True)
 
         logger.info("Extracting text and tables...")

@@ -1,17 +1,16 @@
 import pymupdf
 
-from config import PDFProcessingConfig
-
-
 class PDFProcessorUtils:
-    def __init__(self):
+    def __init__(self, config):
+        
+        self.config = config
 
         # Get relevant config values
-        self.min_img_x, self.min_img_y = PDFProcessingConfig.min_image_size
-        self.page_header_range = PDFProcessingConfig.page_header_range
-        self.page_footer_range = PDFProcessingConfig.page_footer_range
-        self.table_render_dpi = PDFProcessingConfig.table_render_dpi
-        self.max_image_discontinuity = PDFProcessingConfig.max_image_discontinuity
+        self.min_img_x, self.min_img_y = self.config.min_image_size
+        self.page_header_range = self.config.page_header_range
+        self.page_footer_range = self.config.page_footer_range
+        self.table_render_dpi = self.config.table_render_dpi
+        self.max_image_discontinuity = self.config.max_image_discontinuity
 
     def boxes_touch(self, b1, b2, thresh):
         """
