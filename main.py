@@ -62,7 +62,9 @@ class main:
         #query = "Is the temperature given in the smart log in degrees Celsius or Fahrenheit?"
         #query = "What could cause an LBA overlap error when downloading FW?"
         #query = "How do you make sure a set features command can change?"
-        query = "Can you list the steps involved in a firmware download?"
+        #query = "Can you list the steps involved in a firmware download?"
+        query = "What are the options when commiting a firmware?"
+        query = "What is VPD data?"
 
         '''
         print("========= Without Query Expansion =========")

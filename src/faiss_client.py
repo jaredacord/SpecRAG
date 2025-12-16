@@ -75,15 +75,16 @@ class FAISSClient:
 
         return store
 
-    def retrieve(self, query, top_n=3):
+    def retrieve(self, query, top_n=3, metadata_filter=None):
         """
         Method to retrieve the top N chunks from the FAISS store based on a query.
 
         :param query: Query, as string
         :param top_n: Number of chunks to retrieve
+        :param metadata_filter: Filter to apply to the metadata when retrieving chunks
         :return: List of top N chunks
         """
 
-        results = self.store.similarity_search(query, k=top_n)
+        results = self.store.similarity_search(query, k=top_n, filter=metadata_filter)
         logger.info("Retrieved {} chunks".format(top_n))
         return results

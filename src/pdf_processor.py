@@ -383,7 +383,7 @@ class PDFProcessor:
         # Return chunks
         return chunks_to_return
 
-    def pdf_to_chunks(self, pdf_path):
+    def pdf_to_chunks(self, pdf_path, status_update=None):
         """
         Method to extract content from a pdf file, save the assets, and return a list of chunks ready for the
         vector storage
@@ -409,7 +409,14 @@ class PDFProcessor:
 
         # Open PDF with pymupdf, and loop page-by-page (starting at 1)
         with pymupdf.open(pdf_path) as pdf:
+
+            page_count = pdf.page_count
+
             for page_num, page in enumerate(pdf, start=1):
+
+                if status_update is not None:
+                    status_update("Ingesting PDF {} - Extracting data from page {} of {}..."
+                                  "".format(pdf_name, page_num, page_count))
 
                 # Get the tables chunks from the page, and add them to the list
                 table_chunks, table_boundaries = self.get_page_tables(pdf_assets_path, pdf_path, pdf_name, page_num,

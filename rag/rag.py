@@ -22,8 +22,13 @@ class RAG:
 
         self.rag_utils = RAGUtils(self.config)
 
+        self.status_update = None
+
         self.chunk_batch_limit = self.config.chunk_batch_limit
         self.seconds_between_chunks_batches = self.config.seconds_between_chunks_batches
+
+    def set_status_update(self, status_update):
+        self.status_update = status_update
 
     def ingest_pdfs(self, paths):
         """
@@ -49,14 +54,25 @@ class RAG:
                         "".format(pdf_name, path))
 
             # First, extract chunks from the PDF, and split into batches
-            chunks = self.pdf_processor.pdf_to_chunks(path)
+            chunks = self.pdf_processor.pdf_to_chunks(path, self.status_update)
             chunk_batches = [chunks[i:i + self.chunk_batch_limit] for i in range(0, len(chunks), self.chunk_batch_limit)]
+
+            num_of_chunks = len(chunks)
+
+            if self.status_update is not None:
+                self.status_update("Ingesting PDF {} - Adding {} context chunks to FAISS store..."
+                                   "".format(pdf_name, num_of_chunks))
 
             # Then, add each group to the FAISS store
             for chunk_batch_number, chunk_batch in enumerate(chunk_batches):
-                logger.info("\tChunk group {} of {}...".format(chunk_batch_number + 1, len(chunk_batches)))
+                logger.info("\tChunk batch {} of {}...".format(chunk_batch_number + 1, len(chunk_batches)))
                 self.faiss_client.add_to_faiss_store(chunk_batch)
                 time.sleep(self.seconds_between_chunks_batches)
+
+                if self.status_update is not None:
+                    self.status_update("Ingesting PDF {} - {} of {} context chunks added to FAISS store..."
+                                       "".format(pdf_name, (chunk_batch_number + 1) * self.chunk_batch_limit,
+                                                 num_of_chunks))
 
             # Finally, save the FAISS store to disk
             self.faiss_client.save_faiss_store()
@@ -66,31 +82,48 @@ class RAG:
 
             print("Ingested PDFs: {}".format(self.config.ingested_pdfs))
 
-    def get_context_and_answer(self, query):
+    def get_context_and_answer(self, query, metadata_filter=None):
         """
         Method to retrieve relevant chunks from the FAISS store and answer the query using the retrieved context
 
         :param query: Query, as string
+        :param metadata_filter: Filter to apply to the metadata when retrieving chunks
         :return: answer as string, chunks as list of retrieved chunks
         """
 
-        relevant_chunks = self.faiss_client.retrieve(query, top_n=5)
+        relevant_chunks = self.faiss_client.retrieve(query, top_n=5, metadata_filter=metadata_filter)
         return self.llm_client.answer_with_context(query, relevant_chunks)
 
-    def get_context_and_answer_rrf(self, query):
+    def get_context_and_answer_rrf(self, query, metadata_filter=None):
         """
         Method to answer the query using the retrieved context, using query expansion with RRF (Reciprocal Rank Fusion)
 
         :param query: Query, as string
+        :param metadata_filter: Filter to apply to the metadata when retrieving chunks
         :return: response as string, expansive queries as list of strings, contexts as list of retrieved chunks
         """
 
         top_n = 5
+
+        if self.status_update is not None:
+            self.status_update("Expanding Query...")
         expansive_queries = self.llm_client.generate_questions(query)
         all_queries = [query] + expansive_queries
-        all_query_chunks = [self.faiss_client.retrieve(query, top_n=top_n) for query in all_queries]
+
+        if self.status_update is not None:
+            self.status_update("Retrieving context chunks for {} queries...".format(len(all_queries)))
+        all_query_chunks = [self.faiss_client.retrieve(query, top_n=top_n, metadata_filter=metadata_filter)
+                            for query in all_queries]
+
+        if self.status_update is not None:
+            self.status_update("Fusing {} retrieved context chunks...".format(len(all_query_chunks)))
         fused_queries = self.rag_utils.rrf_fusion(all_query_chunks, k=60, top_n=15)
 
+        if self.status_update is not None:
+            self.status_update("Answering query using {} context chunks...".format(len(fused_queries)))
         response, contexts = self.llm_client.answer_with_context(query, fused_queries)
+
+        if self.status_update is not None:
+            self.status_update("Done")
 
         return response, expansive_queries, contexts
