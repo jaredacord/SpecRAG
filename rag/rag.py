@@ -14,21 +14,48 @@ logger = logging.getLogger(__name__)
 class RAG:
 
     def __init__(self, config):
+        """
+        Initialization method for the RAG class.
+
+        :param config: ConfigClient instance
+        """
         self.config = config
 
+        # Initialize clients
         self.llm_client = LLMClient(self.config)
         self.pdf_processor = PDFProcessor(self.llm_client, self.config)
         self.faiss_client = FAISSClient(self.config)
 
+        # Initialize RAG utils
         self.rag_utils = RAGUtils(self.config)
 
-        self.status_update = None
+        # Define status update callback
+        self.status_callback = None
+        self.error_callback = None
 
+        # Get relevant config values
         self.chunk_batch_limit = self.config.chunk_batch_limit
         self.seconds_between_chunks_batches = self.config.seconds_between_chunks_batches
 
-    def set_status_update(self, status_update):
-        self.status_update = status_update
+    def set_status_callback(self, status_update):
+        """
+        Method to set the status update callback
+
+        :param status_update: Method to call with status updates
+        :return: None
+        """
+
+        self.status_callback = status_update
+
+    def set_error_callback(self, error_dialog):
+        """
+        Method to set the error callback
+
+        :param error_dialog: Method to call with error messages
+        :return: None
+        """
+
+        self.error_callback = error_dialog
 
     def ingest_pdfs(self, paths):
         """
@@ -54,13 +81,15 @@ class RAG:
                         "".format(pdf_name, path))
 
             # First, extract chunks from the PDF, and split into batches
-            chunks = self.pdf_processor.pdf_to_chunks(path, self.status_update)
-            chunk_batches = [chunks[i:i + self.chunk_batch_limit] for i in range(0, len(chunks), self.chunk_batch_limit)]
+            chunks = self.pdf_processor.pdf_to_chunks(path, self.status_callback, self.error_callback)
+            if chunks is None:
+                continue
 
+            chunk_batches = [chunks[i:i + self.chunk_batch_limit] for i in range(0, len(chunks), self.chunk_batch_limit)]
             num_of_chunks = len(chunks)
 
-            if self.status_update is not None:
-                self.status_update("Ingesting PDF {} - Adding {} context chunks to FAISS store..."
+            if self.status_callback is not None:
+                self.status_callback("Ingesting PDF {} - Adding {} context chunks to FAISS store..."
                                    "".format(pdf_name, num_of_chunks))
 
             # Then, add each group to the FAISS store
@@ -69,9 +98,10 @@ class RAG:
                 self.faiss_client.add_to_faiss_store(chunk_batch)
                 time.sleep(self.seconds_between_chunks_batches)
 
-                if self.status_update is not None:
-                    self.status_update("Ingesting PDF {} - {} of {} context chunks added to FAISS store..."
-                                       "".format(pdf_name, (chunk_batch_number + 1) * self.chunk_batch_limit,
+                if self.status_callback is not None:
+                    self.status_callback("Ingesting PDF {} - {} of {} context chunks added to FAISS store..."
+                                       "".format(pdf_name,
+                                                 min(num_of_chunks, (chunk_batch_number + 1) * self.chunk_batch_limit),
                                                  num_of_chunks))
 
             # Finally, save the FAISS store to disk
@@ -80,7 +110,8 @@ class RAG:
             # And update the store path in the config
             self.config.add_ingested_pdf(pdf_name)
 
-            print("Ingested PDFs: {}".format(self.config.ingested_pdfs))
+            if self.status_callback is not None:
+                self.status_callback("Done")
 
     def get_context_and_answer(self, query, metadata_filter=None):
         """
@@ -105,25 +136,25 @@ class RAG:
 
         top_n = 5
 
-        if self.status_update is not None:
-            self.status_update("Expanding Query...")
+        if self.status_callback is not None:
+            self.status_callback("Expanding Query...")
         expansive_queries = self.llm_client.generate_questions(query)
         all_queries = [query] + expansive_queries
 
-        if self.status_update is not None:
-            self.status_update("Retrieving context chunks for {} queries...".format(len(all_queries)))
+        if self.status_callback is not None:
+            self.status_callback("Retrieving context chunks for {} queries...".format(len(all_queries)))
         all_query_chunks = [self.faiss_client.retrieve(query, top_n=top_n, metadata_filter=metadata_filter)
                             for query in all_queries]
 
-        if self.status_update is not None:
-            self.status_update("Fusing {} retrieved context chunks...".format(len(all_query_chunks)))
+        if self.status_callback is not None:
+            self.status_callback("Fusing {} retrieved context chunks...".format(len(all_query_chunks)))
         fused_queries = self.rag_utils.rrf_fusion(all_query_chunks, k=60, top_n=15)
 
-        if self.status_update is not None:
-            self.status_update("Answering query using {} context chunks...".format(len(fused_queries)))
+        if self.status_callback is not None:
+            self.status_callback("Answering query using {} context chunks...".format(len(fused_queries)))
         response, contexts = self.llm_client.answer_with_context(query, fused_queries)
 
-        if self.status_update is not None:
-            self.status_update("Done")
+        if self.status_callback is not None:
+            self.status_callback("Done")
 
         return response, expansive_queries, contexts

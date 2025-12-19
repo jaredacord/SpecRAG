@@ -1,204 +1,271 @@
-import json
 import os
-import re
-import time
-from pathlib import Path
 import tkinter as tk
-from tkinter import ttk, filedialog
-from ttkthemes import ThemedTk
-from tkinter.scrolledtext import ScrolledText
+from tkinter import ttk, filedialog, messagebox
 
 from dotenv import load_dotenv
-
-from config.config_client import ConfigClient
-from rag.rag import RAG
+from ttkthemes import ThemedTk
 
 load_dotenv()
-
-from src.pdf_processor import PDFProcessor
 
 import logging
 logger = logging.getLogger(__name__)
 
 class RAGGui:
     def __init__(self, config, rag):
+        """
+        Initialization method for the RAGGui class. This method builds and starts the gui.
+
+        :param config: ConfigClient instance
+        :param rag: RAG instance
+        """
+
         super().__init__()
+
+        # Initialize variables
         self.config = config
         self.rag = rag
 
+        # Set the tkinter theme, title, and geometry
         self.root = ThemedTk(theme="arc")
         self.root.title("SpecRag")
         self.root.geometry("1000x500")
 
+        # Build the gui, and start the mainloop
         self.build_ui()
-
         self.root.mainloop()
 
     def build_ui(self):
+        """
+        This method builds the tkinter gui by calling other methods that build individual sections of the gui
+
+        :return: None
+        """
+
+        # Call methods to build individual sections of the gui
         self.build_query_frame()
         self.build_status_frame()
         self.build_results_section()
         self.build_add_pdf_frame()
 
-    def build_query_frame(self):
+        # Set the error and status callbacks
+        self.rag.set_status_callback(self.update_status)
+        self.rag.set_error_callback(self.display_error_dialog)
 
+    def build_query_frame(self):
+        """
+        This method builds the query input section of the gui
+
+        :return: None
+        """
+
+        # Define the frame for the query input
         query_input_frame = ttk.Frame(self.root, padding=10)
         query_input_frame.pack(fill=tk.X)
 
+        # Add label
         ttk.Label(query_input_frame, text="Enter Query:").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
+        # Define the query variable and add the entry box
         self.query_var = tk.StringVar()
-        ttk.Entry(query_input_frame, textvariable=self.query_var).grid(
-            row=0, column=1, sticky="ew", padx=(0, 10)
-        )
+        ttk.Entry(query_input_frame, textvariable=self.query_var).grid(row=0, column=1, sticky="ew", padx=(0, 10))
 
-        ttk.Button(query_input_frame, text="Submit", command=self.on_query_submit).grid(
-            row=0, column=2
-        )
+        # Add submit button linked to the on_query_submit() method
+        ttk.Button(query_input_frame, text="Submit", command=self.on_query_submit).grid(row=0, column=2)
 
+        # Finally, configure the frame
         query_input_frame.columnconfigure(1, weight=1)
 
     def build_status_frame(self):
+        """
+        This method builds the status section of the gui
+
+        :return: None
+        """
+
+        # Define the frame for the status section
         status_frame = ttk.Frame(self.root, padding=(10, 5))
         status_frame.pack(fill=tk.X)
 
+        # Define the status variable and set the initial status
         self.status_var = tk.StringVar(value="Idle")
 
-        # Centered label
-        self.status_label = ttk.Label(
-            status_frame,
-            textvariable=self.status_var,
-            anchor="center"
-        )
+        # Add the status as a centered label
+        self.status_label = ttk.Label(status_frame, textvariable=self.status_var, anchor="center")
         self.status_label.pack(fill=tk.X)
 
-        self.rag.set_status_update(self.update_status)
-
     def build_results_section(self):
+        """
+        This method builds the results section of the gui, including the filter pane
 
-        # Container for the whole section
+        :return: None
+        """
+
+        # Define the frame for the results section
         results_frame = ttk.Frame(self.root, padding=10)
         results_frame.pack(fill=tk.BOTH, expand=True)
 
-        # Labels
-        ttk.Label(results_frame, text="PDF Filters").grid(
-            row=0, column=0, sticky="w", pady=(0, 5)
-        )
-        ttk.Label(results_frame, text="Answer").grid(
-            row=0, column=1, sticky="w", pady=(0, 5)
-        )
+        # Add the filter and response labels
+        ttk.Label(results_frame, text="Filter by Spec").grid(row=0, column=0, sticky="w", pady=(0, 5))
+        ttk.Label(results_frame, text="Response").grid(row=0, column=1, sticky="w", pady=(0, 5))
 
-        # ---- PDF List (left) ----
-        pdf_listbox = tk.Listbox(
-            results_frame,
-            height=10,
-            selectmode=tk.MULTIPLE
-        )
-        pdf_listbox.grid(
-            row=1, column=0, sticky="nsw", padx=(0, 10)
-        )
+        # Define the spec listbox, and populate from the list of ingested pdfs
+        spec_listbox = tk.Listbox(results_frame, height=10, selectmode=tk.MULTIPLE)
+        spec_listbox.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
 
         for pdf in self.config.ingested_pdfs:
-            pdf_listbox.insert(tk.END, pdf)
+            spec_listbox.insert(tk.END, pdf)
 
-        # ---- Answer Textbox (right) ----
-        answer_frame = ttk.Frame(results_frame)
-        answer_frame.grid(row=1, column=1, sticky="nsew")
+        # Define the response textbox
+        response_frame = ttk.Frame(results_frame)
+        response_frame.grid(row=1, column=1, sticky="nsew")
 
-        answer_text = tk.Text(
-            answer_frame,
-            wrap=tk.WORD,
-            height=10
-        )
-        answer_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Define the response text, and scrollbar
+        response_text = tk.Text(response_frame, wrap=tk.WORD, height=10)
+        response_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        response_scrollbar = ttk.Scrollbar(response_frame, orient=tk.VERTICAL, command=response_text.yview)
+        response_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        response_text.configure(yscrollcommand=response_scrollbar.set)
 
-        answer_scrollbar = ttk.Scrollbar(
-            answer_frame,
-            orient=tk.VERTICAL,
-            command=answer_text.yview
-        )
-        answer_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        answer_text.configure(yscrollcommand=answer_scrollbar.set)
-
-        # Make layout responsive
+        # Configure the frames
         results_frame.columnconfigure(1, weight=1)
         results_frame.rowconfigure(1, weight=1)
 
-        self.pdf_listbox = pdf_listbox
-        self.answer_text = answer_text
+        # Store the listbox and textbox for later use
+        self.spec_listbox = spec_listbox
+        self.response_text = response_text
 
     def build_add_pdf_frame(self):
-        # --- Container frame ---
+        """
+        This method builds the frame for adding PDFs to the RAG
+
+        :return: None
+        """
+
+        # Define the frame for the add pdf section
         add_pdf_frame = ttk.Frame(self.root, padding=10)
         add_pdf_frame.pack(fill=tk.X)
 
-        # --- Label ---
+        # Add label
         ttk.Label(add_pdf_frame, text="Add PDF:").grid(row=0, column=0, sticky="w", padx=(0, 5))
 
-        # --- File path entry ---
+        # Define the pdf path variable and add the entry box
         self.pdf_path_var = tk.StringVar()
         pdf_entry = ttk.Entry(add_pdf_frame, textvariable=self.pdf_path_var)
         pdf_entry.grid(row=0, column=1, sticky="ew", padx=(0, 5))
 
+        # Add browse and submit buttons
         ttk.Button(add_pdf_frame, text="Browse", command=self.browse_file).grid(row=0, column=2, padx=(0, 5))
-
-        # --- Submit button ---
         ttk.Button(add_pdf_frame, text="Submit", command=self.on_add_pdf_submit).grid(row=0, column=3)
 
-        # Make entry expand when window resizes
+        # Configure the frame for resizing
         add_pdf_frame.columnconfigure(1, weight=1)
 
     def browse_file(self):
-        file_path = filedialog.askopenfilename(
-            initialdir=os.getcwd(),
-            title="Select PDF",
-            filetypes=[("PDF files", "*.pdf")],
-        )
+        """
+        Helper method for opening a file dialog to select a PDF file. This method does not return anything, but rather
+        sets self.pdf_path_var
+
+        :return: None
+        """
+
+        # Open file dialog in current working directory
+        file_path = filedialog.askopenfilename(initialdir=os.getcwd(), title="Select PDF",
+                                               filetypes=[("PDF files", "*.pdf")])
+
+        # Set the pdf path variable if file was selected
         if file_path:
             self.pdf_path_var.set(file_path)
 
     def update_status(self, message):
+        """
+        Callback method for updating the status label
+
+        :param message: Message to display, as string
+        :return: None
+        """
+
+        # Set message and update any idle tasks
         self.status_var.set(message)
         self.root.update_idletasks()
 
+    def display_error_dialog(self, message):
+        """
+        Callback method for displaying an error dialog
+
+        :param message: Message to display, as string
+        :return: None
+        """
+        messagebox.showerror("Error", message)
+
     def set_widget_text(self, widget, text):
+        """
+        Helper method for setting the text of a tkinter widget (E.g., the response text)
+
+        :param widget: Tkinter widget
+        :param text: Text to set, as string
+        :return: None
+        """
+
         widget.configure(state=tk.NORMAL)
         widget.delete("1.0", tk.END)
         widget.insert("1.0", text)
         widget.configure(state=tk.DISABLED)
 
-    def on_add_pdf_submit(self):
-        """
-        Called when the 'Submit' button in the Add PDF frame is pressed.
-        Currently, it just prints the selected PDF path.
-        """
-        pdf_path = self.pdf_path_var.get().strip()
-
-        if not pdf_path:
-            return
-
-        self.rag.ingest_pdfs(pdf_path)
-
-        self.pdf_listbox.delete(0, 'end')
-
-        for pdf in self.config.ingested_pdfs:
-            self.pdf_listbox.insert(tk.END, pdf)
-
     def on_query_submit(self):
+        """
+        Method to handle query submission
 
+        :return: None
+        """
+
+        # Get the query text and selected specs from the gui
         query_text = self.query_var.get().strip()
+        selected_indices = self.spec_listbox.curselection()
+        selected_pdfs = [self.spec_listbox.get(i) for i in selected_indices]
 
-        selected_indices = self.pdf_listbox.curselection()
-        selected_pdfs = [self.pdf_listbox.get(i) for i in selected_indices]
-
+        # Return early if query is empty
         if not query_text:
             return
 
+        # Define the metadata filter using the selected specs. If no specs were selected, pass in None
+        # (denoting no filter)
         metadata_filter = None
         if selected_pdfs:
             metadata_filter = {"pdf_name": {"$in": selected_pdfs}}
 
+        # Get response, and display the response text
         response, expansive_queries, contexts = self.rag.get_context_and_answer_rrf(query_text, metadata_filter)
+        self.set_widget_text(self.response_text, response)
 
-        self.set_widget_text(self.answer_text, response)
+    def on_add_pdf_submit(self):
+        """
+        Method to handle add pdf submission
+
+        :return: None
+        """
+
+        # Get the pdf path from the pdf path variable
+        pdf_path = self.pdf_path_var.get().strip()
+
+        # Display error and return in case of empty path
+        if not pdf_path:
+            self.display_error_dialog("PDF path not given")
+            return
+
+        # Prompt user to confirm
+        confirmation_message = ("This action will add the selected PDF to the RAG. The process will take several "
+                                "minutes, and use a substantial number of LLM tokens. Before proceeding, you must "
+                                "have a paid LLM API key, and understand the costs. Continue?")
+        result = messagebox.askyesno("Confirm Add PDF", confirmation_message)
+
+        # Return early if user does not confirm
+        if not result:
+            return
+
+        # Add pdf to RAG
+        self.rag.ingest_pdfs(pdf_path)
+
+        # Repopulate the spec listbox
+        self.spec_listbox.delete(0, 'end')
+        for pdf in self.config.ingested_pdfs:
+            self.spec_listbox.insert(tk.END, pdf)

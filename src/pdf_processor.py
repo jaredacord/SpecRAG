@@ -383,7 +383,7 @@ class PDFProcessor:
         # Return chunks
         return chunks_to_return
 
-    def pdf_to_chunks(self, pdf_path, status_update=None):
+    def pdf_to_chunks(self, pdf_path, status_callback=None, error_callback=None):
         """
         Method to extract content from a pdf file, save the assets, and return a list of chunks ready for the
         vector storage
@@ -400,40 +400,51 @@ class PDFProcessor:
         # Initialize chunks list
         all_chunks = []
 
-        # Get the pdf name, and define and create assets subdirectory
-        pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
-        pdf_assets_path = os.path.join(self.config.pdf_assets_dir, pdf_name)
-        os.makedirs(pdf_assets_path, exist_ok=True)
-
-        logger.info("Extracting text and tables...")
-
         # Open PDF with pymupdf, and loop page-by-page (starting at 1)
-        with pymupdf.open(pdf_path) as pdf:
+        try:
+            with pymupdf.open(pdf_path) as pdf:
 
-            page_count = pdf.page_count
+                # Get the pdf name, and define and create assets subdirectory
+                pdf_name = os.path.splitext(os.path.basename(pdf_path))[0]
+                pdf_assets_path = os.path.join(self.config.pdf_assets_dir, pdf_name)
+                os.makedirs(pdf_assets_path, exist_ok=True)
 
-            for page_num, page in enumerate(pdf, start=1):
+                page_count = pdf.page_count
 
-                if status_update is not None:
-                    status_update("Ingesting PDF {} - Extracting data from page {} of {}..."
-                                  "".format(pdf_name, page_num, page_count))
+                for page_num, page in enumerate(pdf, start=1):
 
-                # Get the tables chunks from the page, and add them to the list
-                table_chunks, table_boundaries = self.get_page_tables(pdf_assets_path, pdf_path, pdf_name, page_num,
-                                                                      page)
-                all_chunks.extend(table_chunks)
+                    if status_callback is not None:
+                        status_callback("Ingesting PDF {} - Extracting data from page {} of {}..."
+                                      "".format(pdf_name, page_num, page_count))
 
-                # Get the drawings chunks from the page, and add them to the list
-                drawing_chunks, drawing_boundaries = self.get_page_drawings(pdf_assets_path, pdf_path, pdf_name,
-                                                                            page_num, page, table_boundaries)
-                all_chunks.extend(drawing_chunks)
+                    # Get the tables chunks from the page, and add them to the list
+                    table_chunks, table_boundaries = self.get_page_tables(pdf_assets_path, pdf_path, pdf_name, page_num,
+                                                                          page)
+                    all_chunks.extend(table_chunks)
 
-                # Compile the non-textual boundaries
-                non_text_boundaries = drawing_boundaries + table_boundaries
+                    # Get the drawings chunks from the page, and add them to the list
+                    drawing_chunks, drawing_boundaries = self.get_page_drawings(pdf_assets_path, pdf_path, pdf_name,
+                                                                                page_num, page, table_boundaries)
+                    all_chunks.extend(drawing_chunks)
 
-                # Get the text chunks from the page, and add them to the list
-                text_chunks = self.get_page_text(pdf_path, pdf_name, page_num, page, non_text_boundaries)
-                all_chunks.extend(text_chunks)
+                    # Compile the non-textual boundaries
+                    non_text_boundaries = drawing_boundaries + table_boundaries
+
+                    # Get the text chunks from the page, and add them to the list
+                    text_chunks = self.get_page_text(pdf_path, pdf_name, page_num, page, non_text_boundaries)
+                    all_chunks.extend(text_chunks)
+
+        except (FileNotFoundError, pymupdf.FileNotFoundError):
+            logger.error("Unable to open file at {}.".format(pdf_path))
+            if error_callback is not None:
+                error_callback("Unable to open file at {}.".format(pdf_path))
+            return None
+
+        except Exception as e:
+            logger.error("Unspecified error when extracting data from the pdf: {}".format(e))
+            if error_callback is not None:
+                error_callback("Unspecified error when extracting data from the pdf:\n{}".format(e))
+            return None
 
         # Stop timer, and get duration
         duration = time.time() - start

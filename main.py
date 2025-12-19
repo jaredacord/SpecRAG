@@ -65,6 +65,7 @@ class main:
         #query = "Can you list the steps involved in a firmware download?"
         query = "What are the options when commiting a firmware?"
         query = "What is VPD data?"
+        query = "How are vendor defined messages used in TLPs?"
 
         '''
         print("========= Without Query Expansion =========")
