@@ -12,7 +12,7 @@ load_dotenv()
 import logging
 logger = logging.getLogger(__name__)
 
-class main:
+class App:
 
     def __init__(self):
         """
@@ -53,4 +53,4 @@ class main:
         )
 
 if __name__ == '__main__':
-    main()
+    App()

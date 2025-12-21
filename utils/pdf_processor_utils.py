@@ -2,6 +2,11 @@ import pymupdf
 
 class PDFProcessorUtils:
     def __init__(self, config):
+        """
+        Initialization method for the PDFProcessorUtils utility class.
+
+        :param config: ConfigClient instance
+        """
         
         self.config = config
 

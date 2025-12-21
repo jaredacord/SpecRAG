@@ -12,15 +12,21 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 class LLMClient:
 
     def __init__(self, config):
+        """
+        Initialize method for the LLMClient class.
+
+        :param config: ConfigClient instance
+        """
 
         self.config = config
 
+        # Abort if GOOGLE_API_KEY is not set
         if "GOOGLE_API_KEY" not in os.environ:
             raise RuntimeError("GOOGLE_API_KEY environment variable must be set.")
 
+        # Initialize LLM model
         self.model_name = self.config.llm_model_name
         self.temperature = self.config.llm_temperature
-
         self.model = ChatGoogleGenerativeAI(
             model=self.model_name,
             temperature=self.temperature
@@ -82,6 +88,9 @@ class LLMClient:
         # Encode the image as base64
         encoded_image = self.encode_image(image_file_path)
 
+        if encoded_image is None:
+            return "Image Not Found"
+
         # Define the messages to send to the LLM
         messages = [
             SystemMessage(content=purpose),
@@ -104,7 +113,7 @@ class LLMClient:
         # Query LLM and return response
         response = self.query_llm("describe_image", messages)
 
-        # Log response as well for tracability
+        # Log response as well for traceability
         logger.info("Image at '{}' has the following description: '{}'"
                     "".format(image_file_path,
                               response.replace('\n', ' ').replace('\r', ' ')))
@@ -152,12 +161,25 @@ class LLMClient:
         :return: base64-encoded image, as string
         """
 
-        with open(image_path, "rb") as f:
-            image_bytes = f.read()
+        # Attempt to read file, and return None if it fails
+        try:
+            with open(image_path, "rb") as f:
+                image_bytes = f.read()
+
+        except Exception as e:
+            logger.error("Error reading image file '{}': {}".format(image_path, e))
+            return None
 
         return base64.b64encode(image_bytes).decode("utf-8")
 
     def answer_with_context(self, query, relevant_chunks):
+        """
+        Method to answer a question using the provided context
+
+        :param query: Query
+        :param relevant_chunks: List of relevant chunks
+        :return: Answer, as string
+        """
 
         logger.info(f"Answering question: '{query}', using {len(relevant_chunks)} refs.")
 
@@ -176,7 +198,8 @@ class LLMClient:
                      2. For tables, use OCR for accurate interpretation.
                      3. For images that are mostly textual, read the text and use it as context in addition to the image.
                      4. If information is missing, say so.
-                     5. You MUST include the relevant context for each portion of your response, surrounded by 
+                     5. If the content for the given context chunk is unavailable, skip only that context chunk.
+                     6. You MUST include the relevant context for each portion of your response, surrounded by 
                         parenthesis, for example '(NVMe-Base-2.0d, page 14)' or '(NVMe-Base-2.0d, pages 121,142)'. 
     
                      CONTEXT:
@@ -186,19 +209,26 @@ class LLMClient:
 
         human_message_content = []
 
+        # Iterate through each context chunk given
         for i, chunk in enumerate(relevant_chunks):
+
+            # Extract metadata and content
             metadata = chunk.metadata
             content = chunk.page_content
 
+            # Get the context chunk type, and define the metadata string
             chunk_type = metadata.get("type", "text")
+            metadata_string = "Type: {}, Source: {}, Page: {}".format(chunk_type, metadata["pdf_name"],
+                                                                      metadata["page"])
 
-            metadata_string = "Type: {}, Source: {}, Page: {}".format(chunk_type, metadata["pdf_name"], metadata["page"])
-
+            # Add the context chunk to the human message content
             human_message_content.extend([
-                {"type": "text", "text": "CONTEXT from {}, page {}".format(metadata["pdf_name"], metadata["page"])},
+                {"type": "text", "text": "CONTEXT from {}, page {}".format(metadata["pdf_name"],
+                                                                           metadata["page"])},
                 {"type": "text", "text": "Metadata - {}".format(metadata_string)}
             ])
 
+            # If context chunk is text, add the text to the human message content
             if chunk_type == "text":
 
                 human_message_content.extend([
@@ -206,33 +236,59 @@ class LLMClient:
                     {"type": "text", "text": content}
                 ])
 
+            # If context chunk is a table, get the table image and add it to the human message content
             elif chunk_type == "table":
+
+                # Get image path then image for the table
                 image_path = metadata["table_path"]
                 encoded_image = self.encode_image(image_path)
 
+                # Skip if the image is unavailable
+                if encoded_image is None:
+                    human_message_content.extend([{"type": "text", "text": "Content Unavailable."}])
+                    continue
+
+                # Add the table image to the human message content
                 human_message_content.extend([
                     {"type": "text", "text": "Content:"},
                     {"type": "image_url","image_url": {"url": "data:image/png;base64,{}".format(encoded_image)}}
                 ])
 
+            # If context chunk is a drawing, get the drawing image and add it to the human message content
             elif chunk_type == "drawing":
+
+                # Get image path then image for the drawing
                 image_path = metadata["drawing_path"]
                 encoded_image = self.encode_image(image_path)
 
+                # Skip if the image is unavailable
+                if encoded_image is None:
+                    human_message_content.extend([{"type": "text", "text": "Content Unavailable."}])
+                    continue
+
+                # Add the drawing image to the human message content
                 human_message_content.extend([
                     {"type": "text", "text": "Content:"},
                     {"type": "image_url", "image_url": {"url": "data:image/png;base64,{}".format(encoded_image)}}
                 ])
 
+            # Otherwise, skip the context chunk
+            else:
+                human_message_content.extend([{"type": "text", "text": "Content Unavailable."}])
+
+        # Now, add the query to the human message content
         human_message_content.append({"type": "text", "text": "\n\nQUERY: {}".format(query)})
 
+        # Define the messages to send to the LLM
         messages = [
             SystemMessage(content=purpose),
             HumanMessage(content=human_message_content)
         ]
 
+        # Query LLM
         response = self.query_llm("answer_with_context", messages)
 
+        # Return the response and relevant chunks
         return response, relevant_chunks
 
     def log_llm_usage(self, method, duration, prompt, response, usage = None):

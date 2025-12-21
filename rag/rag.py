@@ -1,12 +1,10 @@
+import logging
 import os
 import time
 
 from src.faiss_client import FAISSClient
 from src.llm_client import LLMClient
 from src.pdf_processor import PDFProcessor
-
-import logging
-
 from utils.rag_utils import RAGUtils
 
 logger = logging.getLogger(__name__)
@@ -19,6 +17,7 @@ class RAG:
 
         :param config: ConfigClient instance
         """
+
         self.config = config
 
         # Initialize clients
@@ -122,7 +121,8 @@ class RAG:
         :return: answer as string, chunks as list of retrieved chunks
         """
 
-        relevant_chunks = self.faiss_client.retrieve(query, top_n=5, metadata_filter=metadata_filter)
+        relevant_chunks = self.faiss_client.retrieve(query, top_n=self.config.top_n_retrieval,
+                                                     metadata_filter=metadata_filter)
         return self.llm_client.answer_with_context(query, relevant_chunks)
 
     def get_context_and_answer_rrf(self, query, metadata_filter=None):
@@ -134,8 +134,6 @@ class RAG:
         :return: response as string, expansive queries as list of strings, contexts as list of retrieved chunks
         """
 
-        top_n = 5
-
         if self.status_callback is not None:
             self.status_callback("Expanding Query...")
         expansive_queries = self.llm_client.generate_questions(query)
@@ -143,12 +141,14 @@ class RAG:
 
         if self.status_callback is not None:
             self.status_callback("Retrieving context chunks for {} queries...".format(len(all_queries)))
-        all_query_chunks = [self.faiss_client.retrieve(query, top_n=top_n, metadata_filter=metadata_filter)
-                            for query in all_queries]
+        all_query_chunks = [
+            self.faiss_client.retrieve(query, top_n=self.config.top_n_retrieval, metadata_filter=metadata_filter)
+            for query in all_queries]
 
         if self.status_callback is not None:
             self.status_callback("Fusing {} retrieved context chunks...".format(len(all_query_chunks)))
-        fused_queries = self.rag_utils.rrf_fusion(all_query_chunks, k=60, top_n=15)
+        fused_queries = self.rag_utils.rrf_fusion(all_query_chunks, k=self.config.k_value_rrf,
+                                                  top_n=self.config.top_n_context_rrf)
 
         if self.status_callback is not None:
             self.status_callback("Answering query using {} context chunks...".format(len(fused_queries)))

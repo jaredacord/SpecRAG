@@ -13,6 +13,12 @@ logger = logging.getLogger(__name__)
 class PDFProcessor:
 
     def __init__(self, llm_client, config):
+        """
+        Initialization method for the PDFProcessor class.
+
+        :param llm_client: LLMClient instance
+        :param config: ConfigClient instance
+        """
 
         self.config = config
 

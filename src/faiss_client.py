@@ -8,6 +8,11 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 
 class FAISSClient:
     def __init__(self, config):
+        """
+        Initialize method for the FAISSClient class.
+
+        :param config: ConfigClient instance
+        """
 
         self.config = config
 

@@ -3,7 +3,6 @@ from __future__ import annotations
 import configparser
 import logging
 from pathlib import Path
-from typing import List
 
 DEFAULT_CONFIG = {
     "llm": {
@@ -15,6 +14,11 @@ DEFAULT_CONFIG = {
         "embedding_model": "models/gemini-embedding-001",
         "chunk_batch_limit": "1000",
         "seconds_between_chunks_batches": "15",
+    },
+    "generation": {
+        "top_n_retrieval": "5",
+        "top_n_context_rrf": "15",
+        "k_value_rrf": "60"
     },
     "logging": {
         "logging_level": "INFO",
@@ -41,10 +45,18 @@ DEFAULT_CONFIG = {
 
 
 class ConfigClient:
+
     def __init__(self, path = "config.ini"):
+        """
+        Initialization method for the ConfigClient class.
+
+        :param path: Path to the config file
+        """
+
         self.path = Path(path)
         self.parser = configparser.ConfigParser()
 
+        # If config file does not exist, create it. Then, load
         if not self.path.exists():
             self.create_default_config()
 
@@ -52,6 +64,11 @@ class ConfigClient:
 
 
     def load_values(self):
+        """
+        Method to load config values, and store as attributes of the ConfigClient instance.
+
+        :return: None
+        """
 
         self.parser.read(self.path)
 
@@ -65,6 +82,11 @@ class ConfigClient:
         self.chunk_batch_limit = self.parser.getint("faiss", "chunk_batch_limit")
         self.seconds_between_chunks_batches = \
             self.parser.getint("faiss", "seconds_between_chunks_batches")
+
+        # Get RAG generation parameters
+        self.top_n_retrieval = self.parser.getint("generation", "top_n_retrieval")
+        self.top_n_context_rrf = self.parser.getint("generation", "top_n_context_rrf")
+        self.k_value_rrf = self.parser.getint("generation", "k_value_rrf")
 
         # Get logging config values
         self.logging_level = getattr(logging, self.parser.get("logging", "logging_level").upper())
@@ -90,32 +112,55 @@ class ConfigClient:
         # Get the ingested PDFs
         self.ingested_pdfs = self.get_ingested_pdfs()
 
-    def get_ingested_pdfs(self) -> List[str]:
+    def get_ingested_pdfs(self):
+        """
+        Helper method to get the ingested PDFs
+
+        :return: List of ingested PDFs
+        """
+
         raw = self.parser.get("ingestion", "ingested_pdfs", fallback="")
         if not raw.strip():
             return []
         return [p.strip() for p in raw.split(",")]
 
     def add_ingested_pdf(self, pdf_name):
+        """
+        Helper method to add an ingested PDF. Updates instance variable, and also writes to config file.
 
+        :param pdf_name: Name of PDF to add, as string
+        :return: None
+        """
+
+        # Add to instance variable
         self.ingested_pdfs.append(pdf_name)
 
-        self.parser.set(
-            "ingestion",
-            "ingested_pdfs",
-            ",".join(sorted(self.ingested_pdfs)),
-        )
-
+        # Add to parser, then save to disk
+        self.parser.set("ingestion", "ingested_pdfs", ",".join(sorted(self.ingested_pdfs)))
         self.write_config()
 
-    def create_default_config(self) -> None:
+    def create_default_config(self):
+        """
+        Method to create the default config file
+
+        :return: None
+        """
+
+        # Add default values to parser
         for section, values in DEFAULT_CONFIG.items():
             self.parser[section] = values
 
+        # Make directory if it doesn't exist, then write to disk
         self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("w") as f:
             self.parser.write(f)
 
-    def write_config(self) -> None:
+    def write_config(self):
+        """
+        Helper method to write the config file to disk
+
+        :return: None
+        """
+
         with self.path.open("w") as f:
             self.parser.write(f)
