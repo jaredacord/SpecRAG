@@ -80,6 +80,21 @@ The chunks (with each chunk composed of the chunk content and chunk metadata) fo
 list of chunks for the given PDF. Once the PDF is rendered as list of chunks, the chunks are then batched and indexed 
 into a FAISS vector store.
 
+### Query Processing
+
+![query_pipeline.png](/assets/query_pipeline.png)
+
+Each query is expanded by generating 3-5 similar queries. N (config.ini `top_n_retrieval`) context chunks for each 
+query (including the original) are then retrieved from the FAISS vector store using a similarity search. These lists 
+of context chunks are then aggregated into a single list using Reciprocal Rank Fusion (RRF), with no priority given to 
+the original query (since specs contain a lot of jargon). This list is truncated to the top m (config.ini 
+`top_n_context_rrf`) chunks.
+
+For each context chunk in the RRF list, the associated asset (table, drawing) is retrieved from the local storage if
+applicable for that chunk type. The content of these context chunks, or associated asset if applicable, is then 
+compiled as context. The query is then augmented with this context, and sent to the multi-modal LLM for response 
+generation.
+
 ---
 
 ## Installation and Setup
