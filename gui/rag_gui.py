@@ -109,7 +109,7 @@ class RAGGui:
         ttk.Label(results_frame, text="Response").grid(row=0, column=1, sticky="w", pady=(0, 5))
 
         # Define the spec listbox, and populate from the list of ingested pdfs
-        spec_listbox = tk.Listbox(results_frame, height=10, selectmode=tk.MULTIPLE)
+        spec_listbox = tk.Listbox(results_frame, height=10, width=25, selectmode=tk.MULTIPLE)
         spec_listbox.grid(row=1, column=0, sticky="nsw", padx=(0, 10))
 
         for pdf in self.config.ingested_pdfs:

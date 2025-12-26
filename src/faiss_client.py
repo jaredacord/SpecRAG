@@ -70,7 +70,7 @@ class FAISSClient:
         logger.info("Loading FAISS store from {}...".format(self.storage_path))
 
         # If the FAISS store exists, load it, otherwise return None
-        if os.path.exists(self.storage_path):
+        if os.path.exists(os.path.join(self.storage_path, 'index.faiss')):
             store = FAISS.load_local(self.storage_path, self.embeddings, allow_dangerous_deserialization=True)
             logger.info("FAISS store loaded successfully.")
 

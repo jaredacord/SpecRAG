@@ -113,7 +113,7 @@ for light query usage, however, you should consider upgrading to a paid tier for
    cd SpecRAG
    ```
 
-2. **Setup Environment**
+2. **(Optional) Setup Virtual Environment**
    - Create a virtual environment:
      ```bash
      python -m venv .venv
@@ -143,19 +143,68 @@ for light query usage, however, you should consider upgrading to a paid tier for
      GOOGLE_API_KEY=your_google_api_key_here
      ```
 
-5. **Run the Application**
-   - To run the main application:
+5. **(Optional) Copy over faiss_index and pdf_assets folders**
+   - If you have pre-existing `faiss_index` and accompanying `pdf_assets` folders:
+     - Copy the faiss index into `/data/faiss_index/`
+     - Copy the pdf assets into `/data/pdf_assets/`. 
+     - Copy the original pdfs into `/data/pdfs/` (optional).
+     - Populate the `ingested_pdfs` field in config.ini with the pdf filenames, or copy config.ini into the root 
+     directory.
+
+6. **Run the Application**
+   - To run the application:
      ```bash
-     python main2.py
-     ```
-   - Use the GUI (if required) by running:
-     ```bash
-     python gui/rag_gui.py
+     python app.py
      ```
 
 ---
 
 ## Usage
+
+Since PDF ingestion takes a long time and can be costly, the preferred usage is to generate the `data/` folder (which
+includes `data/faiss_index/`, `data/pdf_assets/`, and `data/pdfs/` (optional)) using a list of commonly used 
+specifications once, and distribute to other users as needed.
+
+Once setup and instillation are complete, navigate to the root directory of the project and run `python app.py`. 
+After a few seconds, the GUI will open.
+
+### Description of GUI Elements
+
+![usage_1.png](/assets/usage_1.png)
+
+1. **Query Input**: Enter your query here. Click submit once query and filter (see below) are set.
+2. **Status Indicator**: Displays the status of any running processes. For example, when generating a response to a 
+query, the status indicator will move from 'Expanding Query' to 'Retrieving Chunks for {x} queries' to 'Answering Query 
+using {y} chunks' to 'Done'. 
+3. **Spec Filter**: Multi-selection list for filtering which specifications to use for the query. The filter is applied 
+during the retrieval step, so a response will need to be re-generated for a given query if the filter is changed. If no
+specifications are selected, all specifications will be used. Note: the list shown above is an example. The actual list 
+of specifications will reflect the specifications that have been ingested.
+4. **Response Pane**: Displays the response to the query. 
+5. **PDF Ingestion Input**: If you want to add a new pdf to the RAG, enter the path to the pdf here. After clicking 
+submit, a confirmation window will appear. Ensure you are using a paid Google API key if you use this feature. Also, 
+given the current implementation of SpecRAG, the window may freeze during pdf ingestion, rendering the status indicator 
+incorrect. If this occurs, watch the terminal window used when running the application for updates.
+
+### Examples
+
+Here is a simple example query, filter, and response:
+
+![example_1.png](/assets/example_1.png)
+
+Here are some more examples highlighting different processing paths. For brevity, the image is omitted for each, and 
+instead the query, filter, and response are shown as text.
+
+1. An unrelated query.
+   - Query: What is the current weather in Berlin?  
+   - Filter: None  
+   - Response: The provided context does not contain any information about the current weather in Berlin. Therefore, 
+   I cannot answer your question.
+
+2. 
+    - 
+
+3. **Response**: "PCIe Gen 4 supports a maximum bandwidth of 32 GB/s, and a minimum bandwidth of 8 GB/s."
 
 ---
 
