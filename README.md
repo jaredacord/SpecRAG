@@ -20,6 +20,7 @@ Jump to:
 - [Installation and Setup](#installation-and-setup)
 - [Usage](#usage)
 - [Project Structure](#project-structure)
+- [Future Enhancements](#future-enhancements)
 
 ---
 
@@ -195,16 +196,65 @@ Here is a simple example query, filter, and response:
 Here are some more examples highlighting different processing paths. For brevity, the image is omitted for each, and 
 instead the query, filter, and response are shown as text.
 
-1. An unrelated query.
-   - Query: What is the current weather in Berlin?  
+1. **Another example**
+   - Query: "Where can I find information about the nvme-mi version the device complies to?"
+   - Filter: NVMe-MI-1.4c
+   - Response:
+   ```
+    Information about the NVMe-MI version a device complies to can be found in the NVM Subsystem Information Data Structure (NVMe-MI-1.2c, page 95).
+
+    Specifically:
+   *   **NVMe-MI Major Version Number (MJR)**: This field is located at byte 01 and indicates the major version number of the specification (NVMe-MI-1.2c, page 95). It shall be set to 1h (NVMe-MI-1.2c, page 95).
+   *   **NVMe-MI Minor Version Number (MNR)**: This field is located at byte 02 and indicates the minor version number of the specification (NVMe-MI-1.2c, page 95). It shall be set to 2h (NVMe-MI-1.2c, page 95).
+
+    To retrieve this data structure, the Data Structure Type (DTYP) field in the Read NVMe-MI Data Structure – NVMe Management Dword 0 (bits 31:24) should be set to `00h` for "NVM Subsystem Information" (NVMe-MI-1.2c, page 94).
+   ```
+
+2. **An unrelated query.**
+   - Query: "What is the current weather in Berlin?" 
    - Filter: None  
-   - Response: The provided context does not contain any information about the current weather in Berlin. Therefore, 
+   - Response: 
+   ```
+   The provided context does not contain any information about the current weather in Berlin. Therefore, 
    I cannot answer your question.
+   ```
 
-2. 
-    - 
+3. **Interpreting information from a flow chart image.** Note, the following response is based on *Figure 3-19 Receive 
+   Data Link Layer Handling of TLPs*, found on page 241 of the PCIe 5.0 specification, in conjunction with textual 
+   information found in the same section.
+    - Query: "When handling TLPs in the data link layer, will an incorrect CRC value mark the TLP as a bad TLP?"
+    - Filter: PCI_Express_5.0_v1
+    - Response:
+    ```
+    Yes, an incorrect LCRC value can mark a TLP as a Bad TLP in the Data Link Layer (PCI_Express_5.0_v1, page 239, 241).
 
-3. **Response**: "PCIe Gen 4 supports a maximum bandwidth of 32 GB/s, and a minimum bandwidth of 8 GB/s."
+    The Data Link Layer checks the 32-bit LCRC value of a received TLP by applying the same algorithm used for calculation to the received TLP (excluding its 32-bit LCRC field) and comparing the calculated result with the value in the LCRC field of the received TLP (PCI_Express_5.0_v1, page 239).
+
+    A TLP is considered a "Bad TLP" under the following conditions related to its LCRC:
+    *   If the TLP was *not* indicated as nullified by the Physical Layer, and the calculated LCRC is *not* equal to the received LCRC value (PCI_Express_5.0_v1, page 241).
+    *   If the Physical Layer reports that the received TLP was nullified, but the LCRC does *not* match the logical NOT of the calculated value, the TLP is corrupt and this is considered a Bad TLP error (PCI_Express_5.0_v1, page 239, 241).
+
+    When a TLP is identified as a Bad TLP error, it is discarded, any allocated storage for it is freed, and if the NAK_SCHEDULED flag is clear, a Nak DLLP is scheduled for transmission immediately and the NAK_SCHEDULED flag is set (PCI_Express_5.0_v1, page 239, 241).
+
+    It is important to note that if the Physical Layer reports that the received TLP was nullified, and the LCRC *is* the logical NOT of the calculated value, the TLP is discarded and storage is freed, but this specific scenario is *not* considered an error (PCI_Express_5.0_v1, page 239, 241).
+    ```
+
+4. **Extracting values from a table**
+   - Query: "What are the options for data type in the read nvme-mi data command? Can you provide a value-description mapping as a dict, with values given by their decimal equivalents? You can ignore the reserved fields."
+   - Filter: NVMe-MI-1.4c
+   - Response: 
+   ```
+    The options for the Data Structure Type (DTYP) field in the Read NVMe-MI Data Structure command are as follows (NVMe-MI-1.2c, page 94):
+
+    {
+      0: "NVM Subsystem Information",
+      1: "Port Information",
+      2: "Controller List",
+      3: "Controller Information",
+      4: "Optionally Supported Command List",
+      5: "Management Endpoint Buffer Command Support List"
+    }
+   ```
 
 ---
 
@@ -233,3 +283,4 @@ instead the query, filter, and response are shown as text.
 
 ---
 
+## Future Enhancements
