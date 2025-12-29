@@ -189,6 +189,9 @@ incorrect. If this occurs, watch the terminal window used when running the appli
 
 ### Examples
 
+For these examples, assume you have the following specifications added: NVMe-Base-1.4c,NVMe-Base-2.0d,
+NVMe-Command-Set-1.2,NVMe-MI-1.2c,NVMe-MI-2.1,NVMe-Over-PCIe-1.3,NVMe-Over-TCP-1.2,PCI_Express_5.0_v1
+
 Here is a simple example query, filter, and response:
 
 ![example_1.png](/assets/example_1.png)
@@ -284,3 +287,21 @@ instead the query, filter, and response are shown as text.
 ---
 
 ## Future Enhancements
+
+SpecRAG is currently in its infancy, and there are many areas for improvement. Here is a list of planned improvements, 
+with no definite timeline or order of priority:
+
+- Refactor query and ingestion pipelines to run asynchronously with respect to the GUI. This should resolve the issue of 
+  the GUI becoming unresponsive while 'thinking'.
+- The current implementation for SpecRAG centers around Gemini as the LLM. Support for other LLMs (e.g. GPT-4) should be 
+  added.
+- Improvements to the PDF data extraction. Some assumptions were made in the interest of time in the current 
+  implementation that should be revisited, such as the horizontal expansion of tables and drawings (see code comments). 
+- Improvements in chunking strategies. Namely: dealing with tables which span multiple pages, allowing chunks and chunk 
+  overlaps to span across pages, and perhaps adding summerization context for the corresponding section. 
+- Making SpecRAG version-aware, such that comparisons between different revisions of the same spec can be made.
+- SpecRAG focuses on NVMe and PCIe specifications. Support for other specifications (e.g. Open Compute Project specs) 
+  should be added.
+- The current LLM directives are very strict. If conflicting information is given to the LLM, it may hit a logic bug and 
+  return an incomplete response. More safeguards to guide the LLM in these situations should be added.
+- Improve logging and error handling.
