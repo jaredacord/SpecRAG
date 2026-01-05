@@ -2,6 +2,8 @@ import logging
 import os
 import time
 
+from google.api_core.exceptions import DeadlineExceeded
+
 from src.faiss_client import FAISSClient
 from src.llm_client import LLMClient
 from src.pdf_processor import PDFProcessor
@@ -152,7 +154,17 @@ class RAG:
 
         if self.status_callback is not None:
             self.status_callback("Answering query using {} context chunks...".format(len(fused_queries)))
-        response, contexts = self.llm_client.answer_with_context(query, fused_queries)
+
+        try:
+            response, contexts = self.llm_client.answer_with_context(query, fused_queries)
+
+        except DeadlineExceeded:
+            logger.error("Model timed out after {} seconds. Unable to answer query.".format(int(self.config.timeout)))
+            if self.error_callback is not None:
+                self.error_callback("Model timed out after {} seconds. Please try a different query."
+                                    "".format(int(self.config.timeout)))
+            return None, None, None
+
 
         if self.status_callback is not None:
             self.status_callback("Done")

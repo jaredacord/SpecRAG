@@ -196,6 +196,7 @@ class RAGGui:
         :return: None
         """
         messagebox.showerror("Error", message)
+        self.update_status("Idle")
 
     def set_widget_text(self, widget, text):
         """
@@ -225,6 +226,7 @@ class RAGGui:
 
         # Return early if query is empty
         if not query_text:
+            self.update_status("Idle")
             return
 
         # Define the metadata filter using the selected specs. If no specs were selected, pass in None
@@ -235,7 +237,9 @@ class RAGGui:
 
         # Get response, and display the response text
         response, expansive_queries, contexts = self.rag.get_context_and_answer_rrf(query_text, metadata_filter)
-        self.set_widget_text(self.response_text, response)
+
+        if response is not None:
+            self.set_widget_text(self.response_text, response)
 
     def on_add_pdf_submit(self):
         """
