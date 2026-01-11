@@ -127,12 +127,13 @@ class RAG:
                                                      metadata_filter=metadata_filter)
         return self.llm_client.answer_with_context(query, relevant_chunks)
 
-    def get_context_and_answer_rrf(self, query, metadata_filter=None):
+    def get_context_and_answer_rrf(self, query, metadata_filter=None, stop_event=None):
         """
         Method to answer the query using the retrieved context, using query expansion with RRF (Reciprocal Rank Fusion)
 
         :param query: Query, as string
         :param metadata_filter: Filter to apply to the metadata when retrieving chunks
+        :param stop_event: Event to check for query stop, if any
         :return: response as string, expansive queries as list of strings, contexts as list of retrieved chunks
         """
 
@@ -141,16 +142,25 @@ class RAG:
         expansive_queries = self.llm_client.generate_questions(query)
         all_queries = [query] + expansive_queries
 
+        if stop_event and stop_event.is_set():
+            return None, None, None
+
         if self.status_callback is not None:
             self.status_callback("Retrieving context chunks for {} queries...".format(len(all_queries)))
         all_query_chunks = [
             self.faiss_client.retrieve(query, top_n=self.config.top_n_retrieval, metadata_filter=metadata_filter)
             for query in all_queries]
 
+        if stop_event and stop_event.is_set():
+            return None, None, None
+
         if self.status_callback is not None:
             self.status_callback("Fusing {} retrieved context chunks...".format(len(all_query_chunks)))
         fused_queries = self.rag_utils.rrf_fusion(all_query_chunks, k=self.config.k_value_rrf,
                                                   top_n=self.config.top_n_context_rrf)
+
+        if stop_event and stop_event.is_set():
+            return None, None, None
 
         if self.status_callback is not None:
             self.status_callback("Answering query using {} context chunks...".format(len(fused_queries)))
@@ -165,6 +175,8 @@ class RAG:
                                     "".format(int(self.config.timeout)))
             return None, None, None
 
+        if stop_event and stop_event.is_set():
+            return None, None, None
 
         if self.status_callback is not None:
             self.status_callback("Done")
