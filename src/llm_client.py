@@ -4,6 +4,8 @@ import logging
 import os
 import time
 
+from google.api_core.exceptions import DeadlineExceeded
+
 logger = logging.getLogger(__name__)
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -29,7 +31,9 @@ class LLMClient:
         self.temperature = self.config.llm_temperature
         self.model = ChatGoogleGenerativeAI(
             model=self.model_name,
-            temperature=self.temperature
+            temperature=self.temperature,
+            timeout=self.config.timeout,
+            max_retries=0
         )
 
     def query_llm(self, origin, message):

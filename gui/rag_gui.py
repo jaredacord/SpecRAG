@@ -1,4 +1,5 @@
 import os
+import threading
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 
@@ -24,6 +25,10 @@ class RAGGui:
         # Initialize variables
         self.config = config
         self.rag = rag
+
+        # Keep track of any currently running tasks
+        self.current_query_thread = None
+        self.query_stop_event = threading.Event()
 
         # Set the tkinter theme, title, and geometry
         self.root = ThemedTk(theme="arc")
@@ -196,6 +201,7 @@ class RAGGui:
         :return: None
         """
         messagebox.showerror("Error", message)
+        self.update_status("Idle")
 
     def set_widget_text(self, widget, text):
         """
@@ -218,13 +224,53 @@ class RAGGui:
         :return: None
         """
 
+        if self.current_query_thread is not None and self.current_query_thread.is_alive():
+
+            user_decision = messagebox.askyesno(
+                "Query Already Running",
+                "A query is already being processed.\n\n"
+                "Do you want to stop the current query and process the new one?\n\n"
+                "Click 'Yes' to stop the first query and process the second.\n"
+                "Click 'No' to abort the second query."
+            )
+
+            if not user_decision:
+                return
+            else:
+                self.stop_current_query()
+
+        # Start the task in a new thread
+        self.query_stop_event.clear()
+        self.current_query_thread = threading.Thread(target=self.run_query, daemon=True)
+        self.current_query_thread.start()
+
+    def stop_current_query(self):
+
+        if self.current_query_thread is not None and self.current_query_thread.is_alive():
+            self.update_status("Stopping current query gracefully...")
+            self.query_stop_event.set()
+            self.current_query_thread.join()
+            self.current_query_thread = None
+            self.update_status("Query Cancelled")
+
+    def run_query(self):
+        """
+        Method to handle the actual query task, to be run in a separate thread.
+
+        :return: None
+        """
+
         # Get the query text and selected specs from the gui
         query_text = self.query_var.get().strip()
         selected_indices = self.spec_listbox.curselection()
         selected_pdfs = [self.spec_listbox.get(i) for i in selected_indices]
 
+        if self.query_stop_event.is_set():
+            return
+
         # Return early if query is empty
         if not query_text:
+            self.update_status("Idle")
             return
 
         # Define the metadata filter using the selected specs. If no specs were selected, pass in None
@@ -233,9 +279,17 @@ class RAGGui:
         if selected_pdfs:
             metadata_filter = {"pdf_name": {"$in": selected_pdfs}}
 
+        if self.query_stop_event.is_set():
+            return
+
         # Get response, and display the response text
-        response, expansive_queries, contexts = self.rag.get_context_and_answer_rrf(query_text, metadata_filter)
-        self.set_widget_text(self.response_text, response)
+        response, expansive_queries, contexts = self.rag.get_context_and_answer_rrf(query_text, metadata_filter,
+                                                                                    stop_event=self.query_stop_event)
+
+        if response is not None:
+            self.set_widget_text(self.response_text, response)
+
+        self.current_query_thread = None
 
     def on_add_pdf_submit(self):
         """

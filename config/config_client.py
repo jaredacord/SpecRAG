@@ -8,6 +8,7 @@ DEFAULT_CONFIG = {
     "llm": {
         "model_name": "gemini-2.5-flash",
         "temperature": "0.0",
+        "timeout": "30.0",
     },
     "faiss": {
         "storage_path": "data/faiss_index",
@@ -75,6 +76,7 @@ class ConfigClient:
         # Get LLM config values
         self.llm_model_name = self.parser.get("llm", "model_name")
         self.llm_temperature = self.parser.getfloat("llm", "temperature")
+        self.timeout = self.parser.getfloat("llm", "timeout")
 
         # Get FAISS config values
         self.faiss_storage_path = self.parser.get("faiss", "storage_path")
